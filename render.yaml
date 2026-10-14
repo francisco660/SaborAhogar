@@ -1,0 +1,21 @@
+# Despliegue en Render (plan gratis). Use una cuenta/workspace distinta a la
+# de contabilidad-iglesia para no compartir las 750 horas gratis del mes.
+services:
+  - type: web
+    name: pos-sabor-a-hogar
+    runtime: node
+    plan: free
+    region: ohio
+    rootDir: server
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/salud
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: DATABASE_URL
+        sync: false          # pegar la URL de Neon al crear el servicio
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRA
+        value: 12h

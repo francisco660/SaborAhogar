@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3e2723">
+  <title>Con Sabor a Hogar · POS</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icono.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Inicio de sesión -->
+  <section id="login" hidden>
+    <form class="login-caja" id="form-login">
+      <div class="marca">
+        <div class="con">Con Sabor a</div>
+        <div class="hogar">Hogar</div>
+        <div class="sub">RESTAURANTE</div>
+      </div>
+      <div class="campo">
+        <label for="email">Correo</label>
+        <input id="email" type="email" autocomplete="username" required>
+      </div>
+      <div class="campo">
+        <label for="clave">Clave</label>
+        <input id="clave" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="primario" style="width:100%" type="submit">Entrar</button>
+      <p id="login-error" class="error chico" hidden></p>
+    </form>
+  </section>
+
+  <!-- Aplicación -->
+  <div id="app" hidden>
+    <header class="barra">
+      <span class="logo">Con Sabor a <small>Hogar</small></span>
+      <nav id="nav"></nav>
+      <span class="conexion" id="conexion" title="Conexión en tiempo real"></span>
+      <div class="usuario">
+        <b id="u-nombre"></b>
+        <span id="u-rol"></span> · <button type="button" id="salir">Salir</button>
+      </div>
+    </header>
+    <main id="vista"></main>
+  </div>
+
+  <div id="toasts" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

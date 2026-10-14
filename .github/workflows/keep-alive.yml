@@ -1,0 +1,24 @@
+# Mantiene despierto el servidor gratuito de Render en horario de atención.
+#
+# DESACTIVADO por defecto: en repos privados consume minutos de GitHub Actions
+# que comparte con contabilidad-iglesia. Actívelo (descomente "schedule") solo
+# si este repositorio es público, y cree la variable del repositorio POS_URL
+# (Settings → Secrets and variables → Actions → Variables) con la URL de Render.
+# Recomendado en su lugar: cron-job.org (ver README).
+name: Keep Render Alive (POS)
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   # Cada 10 min de 5:00 a 21:59 hora Colombia (UTC-5) = 10:00 a 02:59 UTC
+  #   - cron: '*/10 10-23 * * *'
+  #   - cron: '*/10 0-2 * * *'
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping servidor
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 "${{ vars.POS_URL }}/api/salud")
+          echo "HTTP status: $STATUS"

@@ -1,0 +1,9 @@
+{
+  "name": "Con Sabor a Hogar · POS",
+  "short_name": "Sabor a Hogar",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fff8ef",
+  "theme_color": "#3e2723",
+  "icons": [{ "src": "icono.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
