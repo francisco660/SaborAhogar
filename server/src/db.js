@@ -13,6 +13,14 @@ export const pool = new pg.Pool({
 // El esquema "pos" y la hora de Colombia quedan por defecto en la base
 // (ALTER DATABASE en scripts/init-db.js), así funciona también con poolers.
 
+// Asegurarse de que cada conexión use el esquema `pos` y la zona horaria esperada.
+pool.on('connect', (client) => {
+  client.query("SET search_path TO pos, public;")
+    .catch(() => {});
+  client.query("SET TIME ZONE 'America/Bogota';")
+    .catch(() => {});
+});
+
 pool.on('error', (err) => console.error('Error inesperado de PostgreSQL:', err.message));
 
 // Ejecuta fn(client) dentro de una transacción
