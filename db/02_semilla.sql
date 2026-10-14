@@ -10,14 +10,17 @@ INSERT INTO ajuste (clave, valor) VALUES
   ('direccion',      'Cra 72 cl 20f -4, París - Bello'),
   ('telefono',       '304 662 5131'),
   ('costo_envio',    '2000'),
-  ('pie_ticket',     '¡Gracias por su compra! Comida casera, con el sabor de siempre.');
+  ('pie_ticket',     '¡Gracias por su compra! Comida casera, con el sabor de siempre.')
+ON CONFLICT (clave) DO NOTHING;
 
 INSERT INTO mesa (nombre, orden)
-SELECT 'Mesa ' || n, n FROM generate_series(1, 8) n;
+SELECT 'Mesa ' || n, n FROM generate_series(1, 8) n
+ON CONFLICT (nombre) DO NOTHING;
 
 INSERT INTO categoria (nombre, orden) VALUES
   ('Desayunos', 1), ('Adiciones desayuno', 2), ('Almuerzo', 3),
-  ('Platos a la carta', 4), ('Adiciones almuerzo', 5), ('Bebidas', 6);
+  ('Platos a la carta', 4), ('Adiciones almuerzo', 5), ('Bebidas', 6)
+ON CONFLICT (nombre) DO NOTHING;
 
 -- ─── Insumos (unidad base: g, ml o und) y costo por unidad base ─────────────
 INSERT INTO insumo (nombre, unidad, stock_minimo, costo_promedio) VALUES
@@ -52,12 +55,16 @@ INSERT INTO insumo (nombre, unidad, stock_minimo, costo_promedio) VALUES
   ('Fruta para jugo',          'g',   3000,      8),
   ('Plátano maduro',           'und',   10,   1500),
   ('Base sopa del día',        'g',   3000,     10),
-  ('Aceite',                   'ml',  2000,     10);
+  ('Aceite',                   'ml',  2000,     10)
+ON CONFLICT (nombre) DO NOTHING;
 
 -- Inventario inicial de ejemplo: 3 veces el stock mínimo
 INSERT INTO movimiento_inventario (insumo_id, tipo, cantidad, costo_unit, nota)
-SELECT id, 'INICIAL', stock_minimo * 3, costo_promedio, 'Inventario inicial de ejemplo'
-  FROM insumo;
+SELECT i.id, 'INICIAL', i.stock_minimo * 3, i.costo_promedio, 'Inventario inicial de ejemplo'
+  FROM insumo i
+ WHERE NOT EXISTS (
+   SELECT 1 FROM movimiento_inventario m WHERE m.insumo_id = i.id AND m.tipo = 'INICIAL'
+ );
 
 -- ─── Ayudas para escribir el menú sin ids ───────────────────────────────────
 CREATE FUNCTION pg_temp.prod(p_cat text, p_nombre text, p_precio numeric, p_desc text, p_orden int)
@@ -217,4 +224,5 @@ SELECT pg_temp.rp('Jugo natural en leche (12 oz)', 'Fruta para jugo', 150),
        pg_temp.rp('Jugo natural en leche (12 oz)', 'Leche', 250),
        pg_temp.rp('Jugo natural en leche (12 oz)', 'Azúcar', 25);
 
-INSERT INTO proveedor (nombre) VALUES ('Plaza de mercado'), ('Carnicería'), ('Distribuidor lácteos');
+INSERT INTO proveedor (nombre) VALUES ('Plaza de mercado'), ('Carnicería'), ('Distribuidor lácteos')
+ON CONFLICT (nombre) DO NOTHING;

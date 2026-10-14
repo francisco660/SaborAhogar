@@ -8,7 +8,7 @@
 --   * Un turno de caja cerrado queda bloqueado.
 -- ============================================================================
 
-CREATE SCHEMA pos;
+CREATE SCHEMA IF NOT EXISTS pos;
 SET search_path TO pos, public;
 
 -- ─── Usuarios y configuración ───────────────────────────────────────────────
@@ -206,8 +206,18 @@ CREATE TABLE pago (
 );
 CREATE INDEX pago_turno ON pago (turno_id);
 
+-- ─── Empleados (nómina) — debe existir antes de referenciarse en `gasto`
+CREATE TABLE IF NOT EXISTS empleado (
+  id        serial PRIMARY KEY,
+  nombre    text NOT NULL UNIQUE,
+  cargo     text,
+  salario   numeric(12,0) NOT NULL CHECK (salario >= 0),
+  activo    boolean NOT NULL DEFAULT true,
+  creado_en timestamptz NOT NULL DEFAULT now()
+);
+
 -- ─── Gastos ─────────────────────────────────────────────────────────────────
-CREATE TABLE gasto (
+CREATE TABLE IF NOT EXISTS gasto (
   id               serial PRIMARY KEY,
   fecha            date NOT NULL DEFAULT (now() AT TIME ZONE 'America/Bogota')::date,
   categoria        text NOT NULL CHECK (categoria IN
@@ -657,7 +667,7 @@ LANGUAGE sql STABLE AS $$
    ORDER BY d.fecha
 $$;
 
-CREATE TABLE empleado (
+CREATE TABLE IF NOT EXISTS empleado (
   id        serial PRIMARY KEY,
   nombre    text NOT NULL UNIQUE,
   cargo     text,
@@ -665,3 +675,116 @@ CREATE TABLE empleado (
   activo    boolean NOT NULL DEFAULT true,
   creado_en timestamptz NOT NULL DEFAULT now()
 );
+
+-- ============================================================================
+-- Row Level Security (RLS) — políticas sugeridas para producción
+-- ============================================================================
+-- Diseño aplicado:
+--  - Tablas de catálogo (menú): `categoria`, `producto`, `grupo_opcion`, `opcion`
+--    quedan con SELECT público (útil si el frontend lee el catálogo directamente).
+--  - Tablas sensibles y de negocio (usuarios, pedidos, pagos, inventario, gastos,
+--    empleados, etc.) quedan con RLS habilitado y POLICIES que permiten acceso
+--    únicamente al servidor (calls con la `service_role` / `DATABASE_URL`).
+-- IMPORTANTE: NO expongas la `service_role` key en el cliente. Si usas Supabase
+-- desde el navegador, crea políticas más finas basadas en `auth.uid()` o claims.
+
+-- --- Políticas para catálogo (SELECT público) --------------------------------
+ALTER TABLE pos.categoria ENABLE ROW LEVEL SECURITY;
+CREATE POLICY public_select_categoria ON pos.categoria FOR SELECT USING ( true );
+
+ALTER TABLE pos.producto ENABLE ROW LEVEL SECURITY;
+CREATE POLICY public_select_producto ON pos.producto FOR SELECT USING ( true );
+
+ALTER TABLE pos.grupo_opcion ENABLE ROW LEVEL SECURITY;
+CREATE POLICY public_select_grupo_opcion ON pos.grupo_opcion FOR SELECT USING ( true );
+
+ALTER TABLE pos.opcion ENABLE ROW LEVEL SECURITY;
+CREATE POLICY public_select_opcion ON pos.opcion FOR SELECT USING ( true );
+
+-- --- Políticas server-only (permitir solo llamadas con service_role) ------------
+-- Condición: current_setting('request.jwt.claims', true) IS NULL => llamada hecha
+-- usando la clave de service role (no provista por el cliente normal).
+-- Ajusta o añade policies más finas si quieres permitir acciones desde el cliente.
+
+-- Función auxiliar: devuelve true si la llamada vino del servidor (service_role)
+DO $$ BEGIN
+  CREATE OR REPLACE FUNCTION pos._is_server() RETURNS boolean LANGUAGE sql AS $is_server$
+    SELECT current_setting('request.jwt.claims', true) IS NULL;
+  $is_server$;
+EXCEPTION WHEN duplicate_function THEN NULL; END$$;
+
+-- Tablas sensibles: permitir sólo al servidor todas las operaciones
+ALTER TABLE pos.usuario ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_usuario ON pos.usuario FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.empleado ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_empleado ON pos.empleado FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.gasto ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_gasto ON pos.gasto FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.gasto_item ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_gasto_item ON pos.gasto_item FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.movimiento_inventario ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_movimiento ON pos.movimiento_inventario FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.pago ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_pago ON pos.pago FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.pedido ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_pedido ON pos.pedido FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.pedido_item ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_pedido_item ON pos.pedido_item FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.pedido_item_opcion ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_pedido_item_opcion ON pos.pedido_item_opcion FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.turno_caja ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_turno_caja ON pos.turno_caja FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.retiro_caja ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_retiro_caja ON pos.retiro_caja FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.cliente ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_cliente ON pos.cliente FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.proveedor ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_proveedor ON pos.proveedor FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+ALTER TABLE pos.ajuste ENABLE ROW LEVEL SECURITY;
+CREATE POLICY server_only_ajuste ON pos.ajuste FOR ALL
+  USING ( pos._is_server() )
+  WITH CHECK ( pos._is_server() );
+
+-- Nota: si necesitas que el cliente (authenticated) pueda insertar/leer
+-- ciertas tablas (por ejemplo crear clientes o leer su propio perfil),
+-- crea políticas específicas usando auth.uid() o inspeccionando claims.
+
