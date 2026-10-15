@@ -243,6 +243,9 @@ tfoot td { font-weight: 800; border-top: 2px solid var(--cafe); border-bottom: 0
 @media (max-width: 900px) {
   .pos, .dos-col { grid-template-columns: minmax(0, 1fr); }
   .cuenta { position: static; }
+  /* Evitar que la barra fija inferior oculte la sección de cuenta al hacer scroll */
+  .con-barra-movil { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  .cuenta { scroll-margin-bottom: calc(112px + env(safe-area-inset-bottom, 0px)); width: 100%; }
   .barra-movil {
     display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
     padding: .6rem 1rem calc(.6rem + env(safe-area-inset-bottom, 0px)); background: var(--cafe); color: #fff;

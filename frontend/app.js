@@ -52,7 +52,8 @@ const S = {
   carritoClave: null,
   nuevo: {},        // datos de un pedido nuevo
   inv: { tab: 'stock' },
-  cocinaVistos: new Set()
+  cocinaVistos: new Set(),
+  avisoListo: new Set()
 };
 
 async function api(ruta, { method = 'GET', body } = {}) {
@@ -325,6 +326,28 @@ function abrirEventos() {
       if (v === 'pedido' && S.vista.args[0] !== 'nuevo') pintarCuenta();
     }, 250);
   };
+  // Notificaciones: avisar al mesero cuando la cocina marque ítems como "listo"
+  fuente.addEventListener('pedidos', async (ev) => {
+    try {
+      const datos = JSON.parse(ev.data || '{}');
+      const id = datos.id;
+      if (!id || S.usuario?.rol !== 'mesero') return;
+      // Consultar el pedido actualizado y avisar solo por ítems nuevos listos
+      const pedido = await api(`/pedidos/${id}`);
+      const nuevos = pedido.items.filter((i) => i.estado === 'listo' && !S.avisoListo.has(`${pedido.id}:${i.id}`));
+      if (nuevos.length) {
+        nuevos.forEach((i) => S.avisoListo.add(`${pedido.id}:${i.id}`));
+        pitido();
+        toast(`Pedido #${pedido.id}: ${nuevos.length} item${nuevos.length > 1 ? 's' : ''} listo${nuevos.length > 1 ? 's' : ''}`, 'ok');
+        // Refrescar la vista activa si corresponde
+        if (S.vista?.nombre === 'pedido' && String(S.vista.args[0]) === String(pedido.id)) {
+          VISTAS['pedido']($('#vista'), String(pedido.id));
+        } else if (S.vista?.nombre === 'pedidos') {
+          VISTAS['pedidos']($('#vista'));
+        }
+      }
+    } catch (e) { /* silencioso */ }
+  });
   fuente.addEventListener('pedidos', refrescar);
   fuente.addEventListener('caja', refrescar);
 }
@@ -432,7 +455,7 @@ async function vistaPedido(el, id, tipo, mesaId) {
       pintarCuenta();
     },
     quitar: (b) => { S.carrito.splice(b.dataset.i, 1); pintarCuenta(); },
-    irCuenta: () => $('#cuenta').scrollIntoView({ behavior: 'smooth' }),
+    irCuenta: () => $('#cuenta').scrollIntoView({ behavior: 'smooth', block: 'center' }),
     enviar: enviarPedido,
     itemEstado: async (b) => {
       if (b.dataset.estado === 'anulado') {
