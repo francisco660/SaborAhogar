@@ -175,6 +175,7 @@ main#vista { padding: 1.1rem; max-width: 1400px; margin: 0 auto; }
 .mesa .det { font-size: .8rem; font-weight: 600; color: var(--suave); }
 .mesa.ocupada { border-color: rgba(255, 90, 54, 0.32); background: linear-gradient(180deg, rgba(255,246,244,0.95), rgba(255,235,229,0.95)); }
 .mesa.ocupada .det { color: var(--rojo); }
+.mesa .chip { white-space: normal; max-width: 100%; line-height: 1.3; margin-top: .35rem; }
 .lista-pedidos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: .8rem; }
 .pedido-card { cursor: pointer; text-align: left; display: block; width: 100%; font-weight: 400; padding: .8rem; min-height: 0; border-radius: 18px; }
 .pedido-card .entre b { font-size: 1rem; }
