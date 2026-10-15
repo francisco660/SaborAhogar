@@ -71,12 +71,12 @@ async function api(ruta, { method = 'GET', body } = {}) {
   return j;
 }
 
-function toast(msg, tipo = '') {
+function toast(msg, tipo = '', ms) {
   const t = document.createElement('div');
   t.className = 'toast ' + tipo;
   t.textContent = msg;
   $('#toasts').appendChild(t);
-  setTimeout(() => t.remove(), tipo === 'error' ? 5000 : 2600);
+  setTimeout(() => t.remove(), ms || (tipo === 'error' ? 5000 : 2600));
 }
 
 async function ejecutar(fn, boton) {
@@ -345,7 +345,7 @@ function abrirEventos() {
           ? `${destino}: pedido listo (${nuevos.length} item${nuevos.length > 1 ? 's' : ''})`
           : `Pedido #${pedido.id}: ${destino} listo (${nuevos.length} item${nuevos.length > 1 ? 's' : ''})`;
         pitido();
-        toast(texto, 'ok');
+        toast(texto, 'ok', 8000);
         if (S.vista?.nombre === 'pedido' && String(S.vista.args[0]) === String(pedido.id)) {
           VISTAS['pedido']($('#vista'), String(pedido.id));
         } else if (S.vista?.nombre === 'pedidos') {
@@ -389,15 +389,16 @@ async function vistaPedidos(el) {
     </div>
     <div class="mesas">
       ${mesas.map((m) => `
-        <button class="mesa ${m.pedido_id ? 'ocupada' : ''}" data-acc="mesa" data-id="${m.id}" data-pedido="${m.pedido_id || ''}">
+        <button class="mesa ${m.pedido_id ? 'ocupada' : ''} ${m.listos ? 'alerta-pedido' : ''}" data-acc="mesa" data-id="${m.id}" data-pedido="${m.pedido_id || ''}">
           <span class="nom">${esc(m.nombre)}</span>
           <span class="det">${m.pedido_id ? `${pesos(m.total)} · ${minutos(m.creado_en)} min` : 'Libre'}</span>
+          ${m.listos ? `<span class="chip listo">${m.listos} listo${m.listos > 1 ? 's' : ''} para entregar</span>` : ''}
         </button>`).join('')}
     </div>
     <div class="seccion">
       <h3>Para llevar y domicilios</h3>
       ${otros.length ? `<div class="lista-pedidos">${otros.map((p) => `
-        <button class="tarjeta pedido-card" data-acc="ver" data-id="${p.id}">
+        <button class="tarjeta pedido-card ${p.items.some((i) => i.estado === 'listo') ? 'alerta-pedido' : ''}" data-acc="ver" data-id="${p.id}">
           <div class="entre"><b>#${p.id} · ${TIPO[p.tipo]}</b><b>${pesos(p.total)}</b></div>
           <div class="suave chico">${esc(p.cliente || p.nombre_cliente || '')} ${p.barrio ? '· ' + esc(p.barrio) : ''} · ${hora(p.creado_en)}</div>
           <div style="margin-top:.4rem">${resumenCocina(p) || '<span class="suave chico">Sin ítems</span>'}</div>
