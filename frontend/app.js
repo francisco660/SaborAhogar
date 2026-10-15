@@ -708,3 +708,772 @@ async function pintarCuenta() {
   if (!p && S.nuevo.tipo === 'DOMICILIO') $('#envio-nuevo').textContent = pesos(S.nuevo.costo_envio);
   pintarTotales();
 }
+
+async function enviarPedido() {
+  const items = S.carrito.map((l) => ({ producto_id: l.producto_id, cantidad: l.cantidad, nota: l.nota, opciones: l.opciones }));
+  if (S.pedido) {
+    await api(`/pedidos/${S.pedido.id}/items`, { method: 'POST', body: { items, enviar: true } });
+    S.carrito = [];
+    toast('Enviado a cocina', 'ok');
+    return pintarCuenta();
+  }
+  const n = S.nuevo;
+  const p = await api('/pedidos', {
+    method: 'POST',
+    body: { tipo: n.tipo, mesa_id: n.mesa_id, nombre_cliente: n.nombre_cliente, cliente: n.cliente,
+            costo_envio: n.costo_envio, nota: n.nota, items, enviar: true }
+  });
+  S.carrito = [];
+  S.carritoClave = String(p.id);
+  toast(`Pedido #${p.id} enviado a cocina`, 'ok');
+  location.hash = `pedido/${p.id}`;
+}
+
+function modalCobro(p) {
+  const puedeLiquidar = p.tipo === 'DOMICILIO' && p.domiciliario_id;
+  const modal = abrirModal(`
+    ${cabeceraModal(`Cobrar pedido #${p.id}`)}
+    <form>
+      <div class="total" style="border-top:0;margin-top:0"><span>Total</span><span>${pesos(p.total)}</span></div>
+      ${puedeLiquidar ? `<label class="check" style="margin-bottom:.6rem"><input type="checkbox" name="liquidar">
+        El domiciliario cobra en efectivo y lo entrega después en caja</label>` : ''}
+      <div id="medios">
+        <div class="fila" style="margin-bottom:.6rem">${MEDIOS.map((m) => `<button type="button" class="peq" data-acc="todo" data-m="${m}">Todo ${MEDIO[m]}</button>`).join('')}</div>
+        ${MEDIOS.map((m) => `<div class="entre" style="margin-bottom:.4rem"><label style="margin:0;width:120px">${MEDIO[m]}</label>
+          <input class="crece" name="${m}" type="number" min="0" step="100" inputmode="numeric" value="${m === 'EFECTIVO' ? p.total : ''}" style="max-width:180px"></div>`).join('')}
+        <div class="campos" style="margin-top:.6rem">
+          <div><label>Efectivo recibido</label><input name="recibido" type="number" min="0" step="100" inputmode="numeric" autofocus></div>
+          <div><label>Cambio</label><div id="cambio" class="kpi" style="padding:.4rem .7rem"><span class="v" style="font-size:1.1rem">—</span></div></div>
+        </div>
+        <p id="restante" class="chico"></p>
+      </div>
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="exito" id="btn-cobrar">Cobrar</button></div>
+    </form>`, {
+    todo: (b, m) => {
+      MEDIOS.forEach((x) => { m.querySelector(`[name=${x}]`).value = x === b.dataset.m ? p.total : ''; });
+      recalcular(m);
+    },
+    input: (_e, m) => recalcular(m),
+    change: (_e, m) => recalcular(m),
+    submit: async (f, _m, cerrar) => {
+      let body;
+      if (f.liquidar?.checked) body = { por_liquidar: true };
+      else body = { pagos: MEDIOS.map((x) => ({ medio: x, valor: Number(f[x].value) || 0 })).filter((x) => x.valor > 0) };
+      const r = await api(`/pedidos/${p.id}/cobrar`, { method: 'POST', body });
+      cerrar();
+      toast(`Pedido #${p.id} cobrado`, 'ok');
+      S.pedido = r;
+      if (await confirmar('¿Imprimir el recibo?', { boton: 'Imprimir' })) imprimir(ticketPedido(r, 'cuenta'));
+      location.hash = 'pedidos';
+    }
+  });
+  recalcular(modal.m);
+  function recalcular(m) {
+    const liquidar = m.querySelector('[name=liquidar]')?.checked;
+    $('#medios', m).style.opacity = liquidar ? '.4' : '1';
+    $$('#medios input', m).forEach((i) => { i.disabled = !!liquidar; });
+    const suma = MEDIOS.reduce((s, x) => s + (Number(m.querySelector(`[name=${x}]`).value) || 0), 0);
+    const ef = Number(m.querySelector('[name=EFECTIVO]').value) || 0;
+    const rec = Number(m.querySelector('[name=recibido]').value) || 0;
+    $('#cambio .v', m).textContent = rec ? pesos(rec - ef) : '—';
+    $('#cambio .v', m).className = 'v ' + (rec && rec < ef ? 'negativo' : '');
+    const dif = p.total - suma;
+    $('#restante', m).innerHTML = liquidar ? '' : dif === 0 ? '<span class="positivo">✔ Pagos completos</span>'
+      : `<span class="negativo">${dif > 0 ? 'Faltan' : 'Sobran'} ${pesos(Math.abs(dif))}</span>`;
+    $('#btn-cobrar', m).disabled = !liquidar && dif !== 0;
+  }
+}
+
+// ═══ VISTA: Cocina ═══════════════════════════════════════════════════════════
+async function vistaCocina(el) {
+  const comandas = await api('/cocina');
+  const nuevos = comandas.filter((c) => !S.cocinaVistos.has(c.id));
+  if (S.cocinaVistos.size && nuevos.length && S.usuario.rol === 'cocina') pitido();
+  comandas.forEach((c) => S.cocinaVistos.add(c.id));
+  if (!S.cocinaVistos.size) S.cocinaVistos.add(0);
+
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Cocina</h2><span class="suave">${comandas.length} pedido(s) in preparación</span></div>
+    ${comandas.length ? `<div class="cocina">${comandas.map((c) => {
+      const min = minutos(c.desde);
+      const destino = c.tipo === 'MESA' ? esc(c.mesa) : c.tipo === 'DOMICILIO' ? '🛵 Domicilio' : '🥡 Para llevar';
+      return `<article class="comanda ${min >= 25 ? 'muy-tarde' : min >= 15 ? 'tarde' : ''}">
+        <header><b>${destino} · #${c.id}</b><span>${min} min</span></header>
+        <div class="cuerpo">
+          ${c.cliente ? `<div class="suave chico" style="padding-top:.3rem">${esc(c.cliente)}</div>` : ''}
+          ${c.items.map((i) => `<div class="it">
+            <span class="c">${i.cantidad}</span>
+            <div class="crece"><div class="n">${esc(i.nombre)}</div>
+              ${i.opciones.length ? `<div class="o">${esc(i.opciones.join(' · '))}</div>` : ''}
+              ${i.nota ? `<span class="nota">${esc(i.nota)}</span>` : ''}</div>
+            <button class="peq exito icono" data-acc="listo" data-id="${i.id}" aria-label="Listo">✓</button></div>`).join('')}
+          ${c.nota ? `<div class="nota-ped">${esc(c.nota)}</div>` : ''}
+          <button class="exito" style="width:100%;margin-top:.6rem" data-acc="todo" data-id="${c.id}">Todo listo</button>
+        </div></article>`;
+    }).join('')}</div>` : '<p class="vacio">🍳 No hay pedidos pendientes. ¡Buen trabajo!</p>'}`;
+
+  S.acc = {
+    listo: async (b) => { await api(`/items/${b.dataset.id}`, { method: 'PATCH', body: { estado: 'listo' } }); vistaCocina(el); },
+    todo: async (b) => { await api(`/pedidos/${b.dataset.id}/listo`, { method: 'POST' }); vistaCocina(el); }
+  };
+  S.reloj = setInterval(() => { if (S.vista?.nombre === 'cocina') vistaCocina(el); }, 60000);
+}
+
+// ═══ VISTA: Domicilios ═══════════════════════════════════════════════════════
+async function vistaDomicilios(el) {
+  const esDomi = S.usuario.rol === 'domiciliario';
+  const [todos, domis] = await Promise.all([
+    api(`/pedidos?estado=todos&dia=${hoyISO()}`),
+    esDomi ? [] : (S.domis = await api('/domiciliarios'))
+  ]);
+  const lista = todos.filter((p) => p.tipo === 'DOMICILIO' && p.estado !== 'anulado');
+  const pend = lista.filter((p) => !p.entregado_en);
+  const entregados = lista.filter((p) => p.entregado_en);
+  const cocina = (p) => {
+    if (p.items.some((i) => i.estado === 'en_cocina' || i.estado === 'pendiente')) return '<span class="chip en_cocina">En cocina</span>';
+    return '<span class="chip listo">Listo para salir</span>';
+  };
+  const pago = (p) => p.estado === 'pagado'
+    ? (p.pagos.some((x) => x.por_liquidar) ? '<span class="chip abierto">Cobrar en efectivo</span>' : '<span class="chip pagado">Pagado</span>')
+    : '<span class="chip abierto">Sin cobrar</span>';
+  const tarjeta = (p) => `
+    <div class="tarjeta">
+      <div class="entre"><b>#${p.id} · ${esc(p.cliente || '')}</b><b>${pesos(p.total)}</b></div>
+      <div>📍 ${esc(p.direccion_entrega || '')} ${p.barrio ? '· ' + esc(p.barrio) : ''}
+        <a class="chico" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((p.direccion_entrega || '') + ', Bello, Antioquia')}">mapa</a></div>
+      <div>📞 <a href="tel:${esc(p.telefono)}">${esc(p.telefono || '')}</a></div>
+      <div class="chico suave">${p.items.filter((i) => i.estado !== 'anulado').map((i) => `${i.cantidad} ${esc(i.nombre)}`).join(', ')}</div>
+      <div class="fila" style="margin-top:.4rem">${cocina(p)} ${pago(p)}
+        ${p.domiciliario ? `<span class="chip entregado">🛵 ${esc(p.domiciliario)} ${hora(p.despachado_en)}</span>` : ''}</div>
+      <div class="fila" style="margin-top:.6rem">
+        ${!esDomi ? `<select data-sel="${p.id}" style="max-width:200px"><option value="">Domiciliario…</option>
+          ${domis.map((d) => `<option value="${d.id}" ${d.id === p.domiciliario_id ? 'selected' : ''}>${esc(d.nombre)}</option>`).join('')}</select>
+          <button class="peq aviso" data-acc="despachar" data-id="${p.id}">Despachar</button>
+          <a class="btn peq" href="#pedido/${p.id}">Abrir</a>` : ''}
+        ${p.domiciliario_id && !p.entregado_en ? `<button class="peq exito" data-acc="entregado" data-id="${p.id}">Entregado</button>` : ''}
+      </div>
+    </div>`;
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Domicilios de hoy</h2>
+      ${!esDomi ? '<a class="btn primario" href="#pedido/nuevo/DOMICILIO">+ Domicilio</a>' : ''}</div>
+    ${pend.length ? `<div class="lista-pedidos">${pend.map(tarjeta).join('')}</div>` : '<p class="vacio">No hay domicilios pendientes.</p>'}
+    ${entregados.length ? `<div class="seccion"><h3>Entregados (${entregados.length})</h3><div class="tarjeta tabla-cont"><table>
+      <thead><tr><th>#</th><th>Cliente</th><th>Domiciliario</th><th>Entregado</th><th class="num">Total</th></tr></thead>
+      <tbody>${entregados.map((p) => `<tr><td>${p.id}</td><td>${esc(p.cliente || '')}</td><td>${esc(p.domiciliario || '')}</td>
+        <td>${hora(p.entregado_en)}</td><td class="num">${pesos(p.total)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}`;
+
+  S.acc = {
+    despachar: async (b) => {
+      const did = $(`[data-sel="${b.dataset.id}"]`).value;
+      if (!did) throw new Error('Elija el domiciliario');
+      await api(`/pedidos/${b.dataset.id}/domicilio`, { method: 'POST', body: { domiciliario_id: Number(did) } });
+      toast('Despachado', 'ok');
+      vistaDomicilios(el);
+    },
+    entregado: async (b) => {
+      await api(`/pedidos/${b.dataset.id}/domicilio`, { method: 'POST', body: { entregado: true } });
+      toast('Marcado como entregado', 'ok');
+      vistaDomicilios(el);
+    }
+  };
+}
+
+// ═══ VISTA: Caja ═════════════════════════════════════════════════════════════
+async function vistaCaja(el) {
+  const [estado, porLiquidar, turnos] = await Promise.all([
+    api('/caja/turno'), api('/caja/por-liquidar'), api('/caja/turnos')
+  ]);
+  const t = estado.turno;
+  const c = estado.cuadre;
+  const filaCuadre = (lbl, v, signo = '') => `<tr><td>${signo} ${lbl}</td><td class="num">${pesos(v)}</td></tr>`;
+
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Caja</h2>
+      ${t ? `<span class="chip abierto">Turno #${t.id} abierto por ${esc(t.cajero)} · ${fechaHora(t.abierto_en)}</span>` : ''}</div>
+    ${!t ? `
+      <form class="tarjeta" data-submit="abrir" style="max-width:420px">
+        <h3>Abrir turno de caja</h3>
+        <p class="suave chico">Cuente el efectivo con el que empieza el día (la base).</p>
+        <div class="campo"><label>Base inicial</label><input name="base" type="number" min="0" step="1000" required inputmode="numeric" autofocus></div>
+        <button class="primario">Abrir caja</button>
+      </form>` : `
+      <div class="kpis">
+        <div class="kpi destacado"><div class="t">Efectivo que debe haber</div><div class="v">${pesos(c.efectivo_esperado)}</div></div>
+        <div class="kpi"><div class="t">Ventas del turno</div><div class="v">${pesos(c.total_ventas)}</div><div class="s">${c.pedidos} pedido(s)</div></div>
+        ${MEDIOS.filter((m) => c.por_medio[m]).map((m) => `<div class="kpi"><div class="t">${MEDIO[m]}</div><div class="v">${pesos(c.por_medio[m])}</div></div>`).join('')}
+      </div>
+      <div class="dos-col seccion">
+        <div class="tarjeta">
+          <h3>Cuadre de efectivo</h3>
+          <table class="cuadre">
+            ${filaCuadre('Base inicial', c.base_inicial)}
+            ${filaCuadre('Ventas en efectivo', c.ventas_efectivo, '+')}
+            ${filaCuadre('Efectivo entregado por domiciliarios', c.liquidaciones_domiciliarios, '+')}
+            ${filaCuadre('Gastos pagados de caja', c.gastos_caja, '−')}
+            ${filaCuadre('Retiros', c.retiros, '−')}
+            <tr class="res"><td>= Efectivo esperado</td><td class="num">${pesos(c.efectivo_esperado)}</td></tr>
+          </table>
+          <form data-submit="cerrar" class="seccion">
+            <h3>Cerrar caja</h3>
+            <div class="campos">
+              <div><label>Efectivo contado</label><input name="contado" type="number" min="0" step="100" required inputmode="numeric"></div>
+              <div><label>Diferencia</label><div class="kpi" style="padding:.4rem .7rem"><span class="v" id="dif" style="font-size:1.1rem">—</span></div></div>
+            </div>
+            <div class="campo" style="margin-top:.6rem"><label>Observaciones</label><input name="nota"></div>
+            <button class="primario">Cerrar turno</button>
+          </form>
+        </div>
+        <div>
+          <div class="tarjeta">
+            <div class="entre"><h3>Retiros</h3><button class="peq" data-acc="retiro">+ Retiro</button></div>
+            ${estado.retiros.length ? estado.retiros.map((r) => `<div class="subtotal"><span>${hora(r.creado_en)} · ${esc(r.motivo)}</span><span>${pesos(r.valor)}</span></div>`).join('') : '<p class="suave chico">Sin retiros.</p>'}
+            <div class="etiqueta-seccion">Gastos pagados de caja</div>
+            ${estado.gastos.length ? estado.gastos.map((g) => `<div class="subtotal ${g.anulado ? 'suave' : ''}"><span>${esc(g.descripcion || CATEGORIAS_GASTO[g.categoria])}${g.anulado ? ' (anulado)' : ''}</span><span>${pesos(g.valor)}</span></div>`).join('') : '<p class="suave chico">Sin gastos de caja. Regístrelos en Gastos.</p>'}
+          </div>
+          <div class="tarjeta">
+            <h3>Efectivo de domiciliarios por recibir</h3>
+            ${porLiquidar.length ? `${porLiquidar.map((x) => `<label class="check"><input type="checkbox" name="liq" value="${x.id}" checked>
+              #${x.pedido_id} · ${esc(x.domiciliario)} · ${esc(x.cliente || '')} — <b>${pesos(x.valor)}</b>
+              ${x.entregado_en ? '' : '<span class="chip en_cocina">en camino</span>'}</label>`).join('')}
+              <button class="aviso" style="margin-top:.5rem" data-acc="liquidar">Recibir efectivo seleccionado</button>`
+              : '<p class="suave chico">Nada pendiente.</p>'}
+          </div>
+        </div>
+      </div>`}
+    <div class="seccion tarjeta tabla-cont">
+      <h3>Turnos anteriores</h3>
+      <table><thead><tr><th>#</th><th>Cajero</th><th>Apertura</th><th>Cierre</th><th class="num">Ventas</th><th class="num">Esperado</th><th class="num">Contado</th><th class="num">Diferencia</th></tr></thead>
+      <tbody>${turnos.filter((x) => x.estado === 'cerrado').map((x) => `<tr>
+        <td>${x.id}</td><td>${esc(x.cajero)}</td><td>${fechaHora(x.abierto_en)}</td><td>${fechaHora(x.cerrado_en)}</td>
+        <td class="num">${pesos(x.resumen?.total_ventas)}</td><td class="num">${pesos(x.efectivo_esperado)}</td><td class="num">${pesos(x.efectivo_contado)}</td>
+        <td class="num ${x.diferencia < 0 ? 'negativo' : x.diferencia > 0 ? 'positivo' : ''}">${pesos(x.diferencia)}</td></tr>`).join('')
+        || '<tr><td colspan="8" class="suave">Aún no hay turnos cerrados.</td></tr>'}</tbody></table>
+    </div>`;
+
+  S.acc = {
+    abrir: async (f) => {
+      await api('/caja/abrir', { method: 'POST', body: { base_inicial: Number(f.base.value) } });
+      toast('Caja abierta', 'ok');
+      vistaCaja(el);
+    },
+    cerrar: async (f) => {
+      const body = { efectivo_contado: Number(f.contado.value), nota: f.nota.value };
+      const dif = body.efectivo_contado - c.efectivo_esperado;
+      const ok = await confirmar(`Esperado ${pesos(c.efectivo_esperado)}, contado ${pesos(body.efectivo_contado)}.
+        <br><b>${dif === 0 ? 'La caja cuadra exacto.' : dif < 0 ? `Faltante de ${pesos(-dif)}` : `Sobrante de ${pesos(dif)}`}</b>
+        <br>Al cerrar, el turno queda bloqueado. ¿Continuar?`, { boton: 'Cerrar turno' });
+      if (!ok) return;
+      try {
+        await api('/caja/cerrar', { method: 'POST', body });
+      } catch (e) {
+        if (e.status !== 409) throw e;
+        if (!(await confirmar(esc(e.message), { boton: 'Cerrar de todos modos', peligro: true }))) return;
+        await api('/caja/cerrar', { method: 'POST', body: { ...body, forzar: true } });
+      }
+      toast('Turno cerrado', 'ok');
+      vistaCaja(el);
+    },
+    retiro: () => abrirModal(`${cabeceraModal('Retiro de caja')}
+      <form><div class="campo"><label>Valor</label><input name="valor" type="number" min="1" step="100" required autofocus></div>
+      <div class="campo"><label>Motivo</label><input name="motivo" required placeholder="Ej: consignación, pago al dueño"></div>
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Registrar</button></div></form>`, {
+      submit: async (f, _m, cerrar) => {
+        await api('/caja/retiro', { method: 'POST', body: { valor: Number(f.valor.value), motivo: f.motivo.value } });
+        cerrar(); vistaCaja(el);
+      }
+    }),
+    liquidar: async () => {
+      const ids = $$('input[name=liq]:checked', el).map((i) => Number(i.value));
+      await api('/caja/liquidar', { method: 'POST', body: { pago_ids: ids } });
+      toast('Efectivo recibido', 'ok');
+      vistaCaja(el);
+    },
+    _input: (e) => {
+      if (e.target.name === 'contado' && c) {
+        const d = (Number(e.target.value) || 0) - c.efectivo_esperado;
+        $('#dif').textContent = e.target.value === '' ? '—' : pesos(d);
+        $('#dif').className = 'v ' + (d < 0 ? 'negativo' : d > 0 ? 'positivo' : '');
+      }
+    }
+  };
+}
+
+// ═══ VISTA: Inventario ═══════════════════════════════════════════════════════
+async function vistaInventario(el) {
+  const tab = S.inv.tab;
+  const insumos = await api('/insumos');
+  const alertas = insumos.filter((i) => i.alerta && i.activo);
+  let cuerpo = '';
+  if (tab === 'stock') {
+    cuerpo = `<div class="tarjeta tabla-cont"><table>
+      <thead><tr><th>Insumo</th><th class="num">Stock</th><th class="num">Mínimo</th><th class="num">Costo prom.</th><th class="num ocultar-movil">Valor</th><th></th></tr></thead>
+      <tbody>${insumos.filter((i) => i.activo).map((i) => `<tr class="${i.alerta ? 'alerta' : ''}">
+        <td>${esc(i.nombre)} ${i.alerta ? '<span class="chip alerta">Bajo</span>' : ''}</td>
+        <td class="num"><b>${num(i.stock)}</b> ${UNIDAD[i.unidad]}</td>
+        <td class="num">${num(i.stock_minimo)}</td>
+        <td class="num">$ ${num(i.costo_promedio)}/${i.unidad}</td>
+        <td class="num ocultar-movil">${pesos(i.valor)}</td>
+        <td class="derecha"><button class="peq" data-acc="merma" data-id="${i.id}">Merma</button>
+          ${tiene() ? `<button class="peq" data-acc="editar" data-id="${i.id}">Editar</button>` : ''}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="4">Valor total del inventario</td><td class="num ocultar-movil">${pesos(insumos.reduce((s, i) => s + i.valor, 0))}</td><td></td></tr></tfoot>
+      </table></div>`;
+  } else if (tab === 'conteo') {
+    cuerpo = `<form class="tarjeta" data-submit="conteo">
+      <p class="suave chico">Escriba lo que contó físicamente. Solo se ajustan los insumos que llene; la diferencia queda registrada como “Ajuste por conteo”.</p>
+      <div class="tabla-cont"><table><thead><tr><th>Insumo</th><th class="num">Sistema</th><th>Contado</th></tr></thead>
+      <tbody>${insumos.filter((i) => i.activo).map((i) => `<tr><td>${esc(i.nombre)}</td><td class="num">${num(i.stock)} ${i.unidad}</td>
+        <td><input name="c${i.id}" type="number" min="0" step="any" inputmode="decimal" style="max-width:140px"></td></tr>`).join('')}</tbody></table></div>
+      <div class="pie fila fin" style="margin-top:.6rem"><button class="primario">Guardar conteo</button></div></form>`;
+  } else {
+    const movs = await api('/movimientos');
+    cuerpo = `<div class="tarjeta tabla-cont"><table>
+      <thead><tr><th>Fecha</th><th>Insumo</th><th>Tipo</th><th class="num">Cantidad</th><th>Detalle</th></tr></thead>
+      <tbody>${movs.map((m) => `<tr><td>${fechaHora(m.creado_en)}</td><td>${esc(m.insumo)}</td><td>${TIPO_MOV[m.tipo]}</td>
+        <td class="num ${m.cantidad < 0 ? 'negativo' : 'positivo'}">${m.cantidad > 0 ? '+' : ''}${num(m.cantidad)} ${m.unidad}</td>
+        <td class="chico suave">${m.pedido_id ? `Pedido #${m.pedido_id}` : ''} ${esc(m.nota || '')} ${esc(m.usuario || '')}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Inventario</h2>
+      <div class="fila">${tiene() ? '<button data-acc="nuevo">+ Insumo</button>' : ''}<a class="btn" href="#gastos">+ Registrar compra</a></div></div>
+    ${alertas.length ? `<div class="tarjeta" style="border-color:var(--rojo);margin-bottom:1rem"><b class="negativo">⚠ ${alertas.length} insumo(s) bajo el mínimo:</b>
+      ${alertas.map((a) => esc(a.nombre)).join(', ')}</div>` : ''}
+    <div class="tabs">${[['stock', 'Stock'], ['conteo', 'Conteo físico'], ['movimientos', 'Movimientos']].map(([k, t]) =>
+      `<button class="${tab === k ? 'activo' : ''}" data-acc="tab" data-t="${k}">${t}</button>`).join('')}</div>
+    ${cuerpo}`;
+
+  const insumo = (id) => insumos.find((i) => i.id === Number(id));
+  S.acc = {
+    tab: (b) => { S.inv.tab = b.dataset.t; vistaInventario(el); },
+    merma: (b) => {
+      const i = insumo(b.dataset.id);
+      abrirModal(`${cabeceraModal('Registrar merma · ' + esc(i.nombre))}
+        <form><div class="campo"><label>Cantidad perdida (${i.unidad})</label><input name="cantidad" type="number" min="0" step="any" required autofocus></div>
+        <div class="campo"><label>Causa</label><input name="nota" required placeholder="Ej: se dañó, se quemó, vencido"></div>
+        <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Registrar</button></div></form>`, {
+        submit: async (f, _m, cerrar) => {
+          await api('/inventario/merma', { method: 'POST', body: { insumo_id: i.id, cantidad: Number(f.cantidad.value), nota: f.nota.value } });
+          cerrar(); toast('Merma registrada', 'ok'); vistaInventario(el);
+        }
+      });
+    },
+    editar: (b) => modalInsumo(insumo(b.dataset.id), () => vistaInventario(el)),
+    nuevo: () => modalInsumo(null, () => vistaInventario(el)),
+    conteo: async (f) => {
+      const conteos = insumos.map((i) => ({ insumo_id: i.id, contado: f[`c${i.id}`]?.value ?? '' })).filter((x) => x.contado !== '');
+      if (!conteos.length) throw new Error('No escribió ningún conteo');
+      const r = await api('/inventario/conteo', { method: 'POST', body: { conteos } });
+      toast(`${r.ajustes} ajuste(s) registrados`, 'ok');
+      S.inv.tab = 'stock';
+      vistaInventario(el);
+    }
+  };
+}
+
+function modalInsumo(i, listo) {
+  abrirModal(`${cabeceraModal(i ? 'Editar insumo' : 'Nuevo insumo')}
+    <form>
+      <div class="campo"><label>Nombre</label><input name="nombre" required value="${esc(i?.nombre || '')}" autofocus></div>
+      <div class="campos">
+        <div><label>Unidad</label><select name="unidad" ${i ? 'disabled' : ''}>
+          ${['g', 'ml', 'und'].map((u) => `<option ${i?.unidad === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+        <div><label>Stock mínimo</label><input name="minimo" type="number" min="0" step="any" value="${i?.stock_minimo ?? 0}"></div>
+      </div>
+      ${i ? `<label class="check" style="margin-top:.6rem"><input type="checkbox" name="activo" ${i.activo ? 'checked' : ''}> Activo</label>` : ''}
+      <p class="suave chico">Compre en kilos o paquetes, pero registre en la unidad base (g, ml o und). El costo se calcula solo con las compras.</p>
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar</button></div>
+    </form>`, {
+    submit: async (f, _m, cerrar) => {
+      const body = { nombre: f.nombre.value, stock_minimo: Number(f.minimo.value) };
+      if (i) await api(`/insumos/${i.id}`, { method: 'PATCH', body: { ...body, activo: f.activo.checked } });
+      else await api('/insumos', { method: 'POST', body: { ...body, unidad: f.unidad.value } });
+      cerrar(); listo();
+    }
+  });
+}
+
+// ═══ VISTA: Gastos ═══════════════════════════════════════════════════════════
+async function vistaGastos(el) {
+  S.gastosRango = S.gastosRango || { desde: hoyISO(), hasta: hoyISO() };
+  const { desde, hasta } = S.gastosRango;
+  const gastos = await api(`/gastos?desde=${desde}&hasta=${hasta}`);
+  const total = gastos.filter((g) => !g.anulado).reduce((s, g) => s + g.valor, 0);
+  const hoy = hoyISO();
+  const inicioMes = hoy.slice(0, 8) + '01';
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Gastos e insumos</h2>
+      <div class="fila"><button data-acc="proveedor">+ Proveedor</button><button class="primario" data-acc="nuevo">+ Registrar gasto</button></div></div>
+    <form class="fila tarjeta" data-submit="filtrar" style="margin-bottom:1rem">
+      <div><label>Desde</label><input type="date" name="desde" value="${desde}"></div>
+      <div><label>Hasta</label><input type="date" name="hasta" value="${hasta}"></div>
+      <button style="align-self:flex-end">Ver</button>
+      <div class="fila" style="align-self:flex-end">${['Hoy', 'Ayer', '7 días', 'Este mes'].map((lbl, i) => '')}</div>
+    </form>
+    <div class="tarjeta tabla-cont"><table>
+      <thead><tr><th>Fecha</th><th>Categoría</th><th>Detalle</th><th>Pago</th><th class="num">Valor</th><th></th></tr></thead>
+      <tbody>${gastos.map((g) => `<tr class="${g.anulado ? 'suave' : ''}">
+        <td>${g.fecha.slice(0, 10)}</td><td>${CATEGORIAS_GASTO[g.categoria]}</td>
+        <td>${esc(g.descripcion || '')} ${g.proveedor ? `<span class="suave">· ${esc(g.proveedor)}</span>` : ''}
+          ${g.empleado ? `<span class="suave">· ${esc(g.empleado)}</span>` : ''}
+          ${g.items.length ? `<div class="chico suave">${g.items.map((i) => `${num(i.cantidad)} ${i.unidad} ${esc(i.insumo)}`).join(', ')}</div>` : ''}
+          ${g.anulado ? `<div class="chico negativo">Anulado: ${esc(g.motismo_anulacion || '')}</div>` : ''}</td>
+        <td>${MEDIO[g.medio_pago]}${g.pagado_de_caja ? ' (caja)' : ''}</td>
+        <td class="num">${pesos(g.valor)}</td>
+        <td>${!g.anulado && tiene() ? `<button class="peq peligro" data-acc="anular" data-id="${g.id}">Anular</button>` : ''}</td></tr>`).join('')
+        || '<tr><td colspan="6" class="vacio">Sin gastos en estas fechas.</td></tr>'}</tbody></table></div>`;
+
+  S.acc = {
+    filtrar: (f) => { S.gastosRango = { desde: f.desde.value, hasta: f.hasta.value || f.desde.value }; vistaGastos(el); },
+    nuevo: () => modalGasto(() => vistaGastos(el)),
+    proveedor: () => abrirModal(`${cabeceraModal('Nuevo proveedor')}
+      <form><div class="campo"><label>Nombre</label><input name="nombre" required autofocus></div>
+      <div class="campos"><div><label>NIT / cédula</label><input name="nit"></div><div><label>Teléfono</label><input name="telefono"></div></div>
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar</button></div></form>`, {
+      submit: async (f, _m, cerrar) => {
+        await api('/proveedores', { method: 'POST', body: { nombre: f.nombre.value, nit: f.nit.value, telefono: f.telefono.value } });
+        cerrar(); toast('Proveedor guardado', 'ok');
+      }
+    }),
+    anular: async (b) => {
+      const motivo = await confirmar('¿Anular este gasto? Si fue compra de insumos, se descuentan del inventario.', { boton: 'Anular', peligro: true, campo: 'Motivo' });
+      if (!motivo) return;
+      await api(`/gastos/${b.dataset.id}/anular`, { method: 'POST', body: { motivo } });
+      vistaGastos(el);
+    }
+  };
+}
+
+async function modalGasto(listo) {
+  const [insumos, proveedores, empleados] = await Promise.all([api('/insumos'), api('/proveedores'), api('/empleados')]);
+  const opcInsumos = insumos.filter((i) => i.activo).map((i) => `<option value="${i.id}">${esc(i.nombre)} (${i.unidad})</option>`).join('');
+  const opcEmpleados = empleados.filter((e) => e.activo).map((e) => `<option value="${e.id}">${esc(e.nombre)}${e.cargo ? ` · ${esc(e.cargo)}` : ''} · ${pesos(e.salario)}</option>`).join('');
+  const linea = () => `<div class="fila linea-compra" style="margin-bottom:.4rem">
+    <select name="insumo" class="crece" style="min-width:160px"><option value="">Insumo…</option>${opcInsumos}</select>
+    <input name="cantidad" type="number" min="0" step="any" placeholder="Cantidad" style="width:110px">
+    <input name="costo" type="number" min="0" step="100" placeholder="Valor total $" style="width:130px">
+    <button type="button" class="peq icono peligro" data-acc="quitar" aria-label="Quitar">✕</button></div>`;
+  abrirModal(`${cabeceraModal('Registrar gasto')}
+    <form>
+      <div class="campos">
+        <div><label>Categoría</label><select name="categoria">${Object.entries(CATEGORIAS_GASTO).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+        <div><label>Fecha</label><input type="date" name="fecha" value="${hoyISO()}"></div>
+        <div><label>Proveedor</label><select name="proveedor"><option value="">—</option>${proveedores.map((p) => `<option value="${p.id}">${esc(p.nombre)}</option>`).join('')}</select></div>
+      </div>
+      <div class="campo" style="margin-top:.6rem"><label>Descripción</label><input name="descripcion" placeholder="Ej: mercado de la semana, recibo de luz"></div>
+      <div class="campo" id="empleado-wrap" hidden>
+        <label>Empleado</label>
+        <select name="empleado"><option value="">Seleccione empleado…</option>${opcEmpleados}</select>
+      </div>
+      <div id="compra">
+        <div class="etiqueta-seccion">Insumos comprados <span class="suave">(cantidad en g, ml o und)</span></div>
+        <div id="lineas">${linea()}${linea()}</div>
+        <button type="button" class="peq" data-acc="linea">+ Otra línea</button>
+      </div>
+      <div id="simple" hidden class="campo" style="margin-top:.6rem"><label>Valor</label><input name="valor" type="number" min="1" step="100"></div>
+      <div class="campos" style="margin-top:.6rem">
+        <div><label>Medio de pago</label><select name="medio">${['EFECTIVO', 'NEQUI', 'DAVIPLATA', 'TARJETA', 'TRANSFERENCIA', 'CREDITO'].map((m) => `<option value="${m}">${MEDIO[m]}</option>`).join('')}</select></div>
+        <label class="check" style="align-self:flex-end"><input type="checkbox" name="caja"> Pagado con efectivo de la caja</label>
+      </div>
+      <div class="total"><span>Total</span><span id="total-gasto">${pesos(0)}</span></div>
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar gasto</button></div>
+    </form>`, {
+    linea: (_b, m) => $('#lineas', m).insertAdjacentHTML('beforeend', linea()),
+    quitar: (b, m) => { b.closest('.linea-compra').remove(); recalcular(m); },
+    input: (_e, m) => recalcular(m),
+    change: (_e, m) => recalcular(m),
+    submit: async (f, m, cerrar) => {
+      const compra = f.categoria.value === 'COMPRA_INSUMOS';
+      const items = compra ? $$('.linea-compra', m).map((l) => ({
+        insumo_id: Number($('[name=insumo]', l).value), cantidad: Number($('[name=cantidad]', l).value), costo_total: Number($('[name=costo]', l).value)
+      })).filter((x) => x.insumo_id && x.cantidad > 0) : [];
+      if (compra && !items.length) throw new Error('Agregue al menos un insumo con su cantidad');
+      if (f.categoria.value === 'NOMINA' && !f.empleado.value) throw new Error('Seleccione el empleado de la nómina');
+      const valor = f.categoria.value === 'NOMINA' ? Number(f.valor.value || 0) : Number(f.valor.value);
+      await api('/gastos', { method: 'POST', body: {
+        categoria: f.categoria.value, fecha: f.fecha.value, proveedor_id: f.proveedor.value || null, empleado_id: f.categoria.value === 'NOMINA' ? Number(f.empleado.value) : null,
+        descripcion: f.descripcion.value, valor, medio_pago: f.medio.value, pagado_de_caja: f.caja.checked, items
+      } });
+      cerrar(); toast('Gasto registrado', 'ok'); listo();
+    }
+  });
+  function recalcular(m) {
+    const compra = $('[name=categoria]', m).value === 'COMPRA_INSUMOS';
+    const nomina = $('[name=categoria]', m).value === 'NOMINA';
+    $('#compra', m).hidden = !compra;
+    $('#simple', m).hidden = compra || nomina;
+    $('#empleado-wrap', m).hidden = !nomina;
+    const caja = $('[name=caja]', m).checked;
+    $('[name=medio]', m).disabled = caja;
+    if (caja) $('[name=medio]', m).value = 'EFECTIVO';
+    let total = 0;
+    if (compra) {
+      total = $$('[name=costo]', m).reduce((s, i) => s + (Number(i.value) || 0), 0);
+    } else if (nomina) {
+      const empleadoSel = $('[name=empleado]', m);
+      const emp = empleados.find((e) => String(e.id) === String(empleadoSel.value));
+      total = emp ? Number(emp.salario) : Number($('[name=valor]', m).value) || 0;
+    } else {
+      total = Number($('[name=valor]', m).value) || 0;
+    }
+    $('#total-gasto', m).textContent = pesos(total);
+  }
+}
+
+// ═══ VISTA: Menú (administración) ════════════════════════════════════════════
+async function vistaMenu(el) {
+  const menu = await api('/menu?todo=1');
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Menú, precios y recetas</h2></div>
+    <div class="tarjeta">
+      <p class="suave chico">Listado del menú actual. Aquí se administran categorías, productos y costos.</p>
+      ${menu.map((c) => `<div class="seccion">
+        <h3>${esc(c.nombre)} ${c.activo ? '' : '<span class="chip anulado">oculta</span>'}</h3>
+        <div class="tabla-cont"><table><thead><tr><th>Producto</th><th class="num">Precio</th><th class="num">Costo</th><th class="num">% costo</th></tr></thead>
+        <tbody>${c.productos.map((p) => {
+          const pc = p.precio ? (p.costo_base / p.precio) * 100 : NaN;
+          return `<tr class="${p.activo ? '' : 'suave'}">
+            <td>${esc(p.nombre)} ${p.activo ? '' : '<span class="chip anulado">inactivo</span>'}</td>
+            <td class="num">${pesos(p.precio)}</td>
+            <td class="num">${pesos(p.costo_base)}</td>
+            <td class="num ${pc > 40 ? 'negativo' : ''}">${pct(pc)}</td>
+          </tr>`;
+        }).join('') || '<tr><td colspan="4" class="suave">Sin productos</td></tr>'}</tbody>
+      </table></div>
+      </div>`).join('') || '<p class="suave">Sin categorías.</p>'}
+    </div>`;
+  S.acc = {};
+}
+
+// ═══ VISTA: Reportes ═════════════════════════════════════════════════════════
+async function vistaReportes(el) {
+  S.rep = S.rep || { desde: hoyISO(), hasta: hoyISO() };
+  const r = await api(`/reportes/resumen?desde=${S.rep.desde}&hasta=${S.rep.hasta}`);
+  const t = r.totales;
+  const pcCosto = t.ventas ? (t.costo_ventas / t.ventas) * 100 : NaN;
+  const margenOp = t.ventas ? (t.utilidad_operativa / t.ventas) * 100 : NaN;
+  const maxProd = Math.max(1, ...r.productos.map((p) => p.ventas));
+  const atajo = (lbl, d, h) => `<button type="button" class="peq" data-acc="rango" data-d="${d}" data-h="${h}">${lbl}</button>`;
+  const hoy = hoyISO();
+  const inicioMes = hoy.slice(0, 8) + '01';
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Reportes y utilidades</h2></div>
+    <form class="tarjeta fila" data-submit="filtrar" style="margin-bottom:1rem">
+      <div><label>Desde</label><input type="date" name="desde" value="${r.desde}"></div>
+      <div><label>Hasta</label><input type="date" name="hasta" value="${r.hasta}"></div>
+      <button style="align-self:flex-end">Ver</button>
+      <div class="fila" style="align-self:flex-end">${atajo('Hoy', hoy, hoy)}${atajo('Ayer', sumarDias(hoy, -1), sumarDias(hoy, -1))}${atajo('7 días', sumarDias(hoy, -6), hoy)}${atajo('Este mes', inicioMes, hoy)}</div>
+    </form>
+    <div class="kpis">
+      <div class="kpi"><div class="t">Ventas</div><div class="v">${pesos(t.ventas)}</div><div class="s">${t.pedidos} pedidos · ticket prom. ${pesos(t.pedidos ? t.ventas / t.pedidos : 0)}</div></div>
+      <div class="kpi"><div class="t">Costo de ventas (recetas)</div><div class="v">${pesos(t.costo_ventas)}</div><div class="s">${pct(pcCosto)} de las ventas</div></div>
+      <div class="kpi"><div class="t">Utilidad bruta</div><div class="v">${pesos(t.utilidad_bruta)}</div></div>
+      <div class="kpi"><div class="t">Mermas y ajustes</div><div class="v ${t.mermas > 0 ? 'negativo' : ''}">${pesos(t.mermas)}</div></div>
+      <div class="kpi"><div class="t">Gastos operativos</div><div class="v">${pesos(t.gastos)}</div><div class="s">sin compras de insumos</div></div>
+      <div class="kpi destacado"><div class="t">Utilidad operativa</div><div class="v">${pesos(t.utilidad_operativa)}</div><div class="s">margen ${pct(margenOp)}</div></div>
+    </div>
+    <div class="dos-col seccion">
+      <div class="tarjeta tabla-cont"><h3>Platos más vendidos</h3><table>
+        <thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Ventas</th><th class="num">Margen</th></tr></thead>
+        <tbody>${r.productos.map((p) => `<tr><td>${esc(p.nombre)}<div class="barra-dato" style="width:${(p.ventas / maxProd) * 100}%"></div></td>
+          <td class="num">${p.cantidad}</td><td class="num">${pesos(p.ventas)}</td><td class="num">${pct(p.ventas ? ((p.ventas - p.costo) / p.ventas) * 100 : NaN)}</td></tr>`).join('')
+          || '<tr><td colspan="4" class="suave">Sin ventas</td></tr>'}</tbody></table></div>
+      <div>
+        <div class="tarjeta"><h3>Por medio de pago</h3>${r.medios.map((m) => `<div class="subtotal"><span>${MEDIO[m.medio]}</span><span>${pesos(m.valor)}</span></div>`).join('') || '<p class="suave">—</p>'}</div>
+        <div class="tarjeta"><h3>Por tipo de pedido</h3>${r.tipos.map((x) => `<div class="subtotal"><span>${TIPO[x.tipo]} (${x.pedidos})</span><span>${pesos(x.ventas)}</span></div>`).join('') || '<p class="suave">—</p>'}</div>
+        <div class="tarjeta"><h3>Gastos por categoría</h3>${r.gastos.map((g) => `<div class="subtotal"><span>${CATEGORIAS_GASTO[g.categoria]}</span><span>${pesos(g.valor)}</span></div>`).join('') || '<p class="suave">—</p>'}
+          <p class="chico suave">Las compras de insumos van al inventario; se vuelven costo cuando se vende el plato.</p></div>
+      </div>
+    </div>
+    ${r.dias.length > 1 ? `<div class="tarjeta tabla-cont seccion"><h3>Por día</h3><table>
+      <thead><tr><th>Fecha</th><th class="num">Pedidos</th><th class="num">Ventas</th><th class="num">Costo</th><th class="num">Mermas</th><th class="num">Gastos</th><th class="num">Utilidad</th></tr></thead>
+      <tbody>${r.dias.map((d) => `<tr><td>${d.fecha.slice(0, 10)}</td><td class="num">${d.pedidos}</td><td class="num">${pesos(d.ventas)}</td>
+        <td class="num">${pesos(d.costo_ventas)}</td><td class="num">${pesos(d.mermas)}</td><td class="num">${pesos(d.gastos)}</td>
+        <td class="num ${d.utilidad_operativa < 0 ? 'negativo' : ''}"><b>${pesos(d.utilidad_operativa)}</b></td></tr>`).join('')}</tbody></table></div>` : ''}`;
+
+  S.acc = {
+    filtrar: (f) => { S.rep = { desde: f.desde.value, hasta: f.hasta.value || f.desde.value }; vistaReportes(el); },
+    rango: (b) => { S.rep = { desde: b.dataset.d, hasta: b.dataset.h }; vistaReportes(el); }
+  };
+}
+
+// ═══ VISTA: Ajustes (usuarios, empleados, mesas, negocio) ───────────────
+async function vistaAjustes(el) {
+  const [usuarios, empleados, mesas, aj] = await Promise.all([api('/usuarios'), api('/empleados'), api('/mesas'), api('/ajustes')]);
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Ajustes</h2></div>
+    <div class="admin-grid">
+      <div class="tarjeta panel-admin">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">Acceso</span>
+            <h3>Usuarios</h3>
+          </div>
+          <button class="primario peq" data-acc="nuevoUsuario">+ Crear</button>
+        </div>
+        <div class="tabla-cont"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+        <tbody>${usuarios.map((u) => `<tr class="${u.activo ? '' : 'suave'}">
+          <td><strong>${esc(u.nombre)}</strong></td>
+          <td>${esc(u.email)}</td>
+          <td><span class="admin-badge">${ROL[u.rol]}</span></td>
+          <td>${u.activo ? '<span class="state ok">Activo</span>' : '<span class="state off">Inactivo</span>'}</td>
+          <td class="derecha admin-actions">
+            <button class="peq" data-acc="editarUsuario" data-id="${u.id}">Editar</button>
+            <button class="peq" data-acc="claveUsuario" data-id="${u.id}">Clave</button>
+            <button class="peq peligro" data-acc="eliminarUsuario" data-id="${u.id}">${u.activo ? 'Eliminar' : 'Inactivo'}</button>
+            <button class="peq" data-acc="toggleUsuario" data-id="${u.id}" data-activo="${u.activo}">${u.activo ? 'Desactivar' : 'Activar'}</button>
+          </td></tr>`).join('')}</tbody></table></div>
+        <form data-submit="usuario" class="admin-form">
+          <div class="etiqueta-seccion">Crear usuario</div>
+          <div class="campos">
+            <div><label>Nombre</label><input name="nombre" required></div>
+            <div><label>Correo</label><input name="email" type="email" required></div>
+            <div><label>Clave</label><input name="clave" type="password" minlength="6" required></div>
+            <div><label>Rol</label><select name="rol">${Object.entries(ROL).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+          </div>
+          <button class="primario" style="margin-top:.6rem">Guardar usuario</button>
+        </form>
+      </div>
+
+      <div class="tarjeta panel-admin">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">Personal</span>
+            <h3>Empleados y nómina</h3>
+          </div>
+          <button class="primario peq" data-acc="nuevoEmpleado">+ Agregar</button>
+        </div>
+        <div class="tabla-cont"><table><thead><tr><th>Nombre</th><th>Cargo</th><th>Salario</th><th>Estado</th><th></th></tr></thead>
+        <tbody>${empleados.map((e) => `<tr class="${e.activo ? '' : 'suave'}">
+          <td><strong>${esc(e.nombre)}</strong></td>
+          <td>${esc(e.cargo || '—')}</td>
+          <td>${pesos(e.salario)}</td>
+          <td>${e.activo ? '<span class="state ok">Activo</span>' : '<span class="state off">Inactivo</span>'}</td>
+          <td class="derecha admin-actions">
+            <button class="peq" data-acc="editarEmpleado" data-id="${e.id}">Editar</button>
+            <button class="peq peligro" data-acc="eliminarEmpleado" data-id="${e.id}">${e.activo ? 'Eliminar' : 'Inactivo'}</button>
+            <button class="peq" data-acc="toggleEmpleado" data-id="${e.id}" data-activo="${e.activo}">${e.activo ? 'Desactivar' : 'Activar'}</button>
+          </td></tr>`).join('') || '<tr><td colspan="5" class="vacio">Sin empleados registrados.</td></tr>'}</tbody></table></div>
+        <form data-submit="empleado" class="admin-form">
+          <div class="etiqueta-seccion">Agregar empleado</div>
+          <div class="campos">
+            <div><label>Nombre</label><input name="nombre" required></div>
+            <div><label>Cargo</label><input name="cargo"></div>
+            <div><label>Salario</label><input name="salario" type="number" min="0" step="1000" required></div>
+          </div>
+          <button class="primario" style="margin-top:.6rem">Guardar empleado</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="tarjeta">
+      <h3>Mesas</h3>
+      <div class="fila">${mesas.map((m) => `<span class="chip abierto" style="font-size:.85rem">${esc(m.nombre)}
+        <button class="peq icono" style="min-height:0;padding:0 .2rem;border:0;background:none" data-acc="quitarMesa" data-id="${m.id}" aria-label="Quitar">✕</button></span>`).join('')}</div>
+      <form data-submit="mesa" class="fila seccion"><input name="nombre" placeholder="Ej: Mesa 9, Terraza 1" required style="max-width:240px"><button>+ Mesa</button></form>
+    </div>
+    <div class="tarjeta">
+      <h3>Datos del negocio (tickets)</h3>
+      <form data-submit="negocio">
+        <div class="campos">
+          <div><label>Nombre</label><input name="nombre_negocio" value="${esc(aj.nombre_negocio || '')}"></div>
+          <div><label>Teléfono</label><input name="telefono" value="${esc(aj.telefono || '')}"></div>
+          <div><label>Dirección</label><input name="direccion" value="${esc(aj.direccion || '')}"></div>
+          <div><label>Costo de domicilio por defecto</label><input name="costo_envio" type="number" min="0" step="500" value="${esc(aj.costo_envio || 0)}"></div>
+        </div>
+        <div class="campo" style="margin-top:.6rem"><label>Mensaje al pie del ticket</label><input name="pie_ticket" value="${esc(aj.pie_ticket || '')}"></div>
+        <button class="primario">Guardar</button>
+      </form>
+    </div>`;
+
+  const modalUsuario = (u, listo) => abrirModal(`${cabeceraModal(u ? 'Editar usuario' : 'Crear usuario')}
+    <form>
+      <div class="campos">
+        <div><label>Nombre</label><input name="nombre" required value="${esc(u?.nombre || '')}" autofocus></div>
+        <div><label>Correo</label><input name="email" type="email" required value="${esc(u?.email || '')}"></div>
+        <div><label>Rol</label><select name="rol">${Object.entries(ROL).map(([k, v]) => `<option value="${k}" ${u?.rol === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+      </div>
+      ${u ? '<div class="campo"><label>Nueva clave (opcional)</label><input name="clave" type="password" minlength="6" placeholder="Si deja vacío no cambia la clave"></div>' : '<div class="campo"><label>Clave</label><input name="clave" type="password" minlength="6" required></div>'}
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar</button></div>
+    </form>`, {
+    submit: async (f, _m, cerrar) => {
+      const body = { nombre: f.nombre.value, email: f.email.value, rol: f.rol.value };
+      if (f.clave.value.trim()) body.clave = f.clave.value.trim();
+      if (u) await api(`/usuarios/${u.id}`, { method: 'PATCH', body });
+      else await api('/usuarios', { method: 'POST', body: { ...body, clave: f.clave.value.trim() } });
+      cerrar(); toast(u ? 'Usuario actualizado' : 'Usuario creado', 'ok'); listo();
+    }
+  });
+
+  const modalEmpleado = (e, listo) => abrirModal(`${cabeceraModal(e ? 'Editar empleado' : 'Agregar empleado')}
+    <form>
+      <div class="campos">
+        <div><label>Nombre</label><input name="nombre" required value="${esc(e?.nombre || '')}" autofocus></div>
+        <div><label>Cargo</label><input name="cargo" value="${esc(e?.cargo || '')}"></div>
+        <div><label>Salario</label><input name="salario" type="number" min="0" step="1000" required value="${esc(e?.salario ?? '')}"></div>
+      </div>
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar</button></div>
+    </form>`, {
+    submit: async (f, _m, cerrar) => {
+      const body = { nombre: f.nombre.value, cargo: f.cargo.value, salario: Number(f.salario.value) };
+      if (e) await api(`/empleados/${e.id}`, { method: 'PATCH', body });
+      else await api('/empleados', { method: 'POST', body });
+      cerrar(); toast(e ? 'Empleado actualizado' : 'Empleado guardado', 'ok'); listo();
+    }
+  });
+
+  S.acc = {
+    usuario: async (f) => {
+      await api('/usuarios', { method: 'POST', body: { nombre: f.nombre.value, email: f.email.value, clave: f.clave.value, rol: f.rol.value } });
+      toast('Usuario guardado', 'ok'); vistaAjustes(el);
+    },
+    nuevoUsuario: () => modalUsuario(null, () => vistaAjustes(el)),
+    editarUsuario: (b) => {
+      const u = usuarios.find((x) => String(x.id) === String(b.dataset.id));
+      modalUsuario(u, () => vistaAjustes(el));
+    },
+    claveUsuario: async (b) => {
+      const id = Number(b.dataset.id);
+      const clave = await confirmar('Escriba la nueva contraseña para este usuario.', { boton: 'Guardar clave', campo: 'Nueva clave' });
+      if (!clave) return;
+      await api(`/usuarios/${id}`, { method: 'PATCH', body: { clave } });
+      toast('Clave actualizada', 'ok'); vistaAjustes(el);
+    },
+    toggleUsuario: async (b) => { await api(`/usuarios/${b.dataset.id}`, { method: 'PATCH', body: { activo: b.dataset.activo !== 'true' } }); vistaAjustes(el); },
+    eliminarUsuario: async (b) => {
+      const confirmado = await confirmar('¿Desea eliminar este usuario? Quedará inactivo.', { boton: 'Eliminar', peligro: true });
+      if (!confirmado) return;
+      await api(`/usuarios/${b.dataset.id}`, { method: 'DELETE' });
+      vistaAjustes(el);
+    },
+    empleado: async (f) => {
+      await api('/empleados', { method: 'POST', body: { nombre: f.nombre.value, cargo: f.cargo.value, salario: Number(f.salario.value) } });
+      toast('Empleado guardado', 'ok'); vistaAjustes(el);
+    },
+    nuevoEmpleado: () => modalEmpleado(null, () => vistaAjustes(el)),
+    editarEmpleado: (b) => {
+      const e = empleados.find((x) => String(x.id) === String(b.dataset.id));
+      modalEmpleado(e, () => vistaAjustes(el));
+    },
+    toggleEmpleado: async (b) => { await api(`/empleados/${b.dataset.id}`, { method: 'PATCH', body: { activo: b.dataset.activo !== 'true' } }); vistaAjustes(el); },
+    eliminarEmpleado: async (b) => {
+      const confirmado = await confirmar('¿Desea eliminar este empleado? Quedará inactivo.', { boton: 'Eliminar', peligro: true });
+      if (!confirmado) return;
+      await api(`/empleados/${b.dataset.id}`, { method: 'DELETE' });
+      vistaAjustes(el);
+    },
+    mesa: async (f) => { await api('/mesas', { method: 'POST', body: { nombre: f.nombre.value } }); vistaAjustes(el); },
+    quitarMesa: async (b) => { await api(`/mesas/${b.dataset.id}`, { method: 'DELETE' }); vistaAjustes(el); },
+    negocio: async (f) => {
+      const body = Object.fromEntries(new FormData(f));
+      await api('/ajustes', { method: 'PUT', body });
+      S.ajustes = await api('/ajustes');
+      toast('Datos guardados', 'ok');
+    }
+  };
+}
+
+const VISTAS = {
+  pedidos: vistaPedidos, pedido: vistaPedido, cocina: vistaCocina, domicilios: vistaDomicilios, caja: vistaCaja,
+  inventario: vistaInventario, gastos: vistaGastos, menu: vistaMenu, reportes: vistaReportes, ajustes: vistaAjustes
+};
+
+iniciar();
