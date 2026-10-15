@@ -331,13 +331,13 @@ function abrirEventos() {
     try {
       const datos = JSON.parse(ev.data || '{}');
       const id = datos.id;
-      if (!id || S.usuario?.rol !== 'mesero') return;
+      if (!id || !tiene('mesero', 'cajero')) return;
       const pedido = await api(`/pedidos/${id}`);
       const nuevos = pedido.items.filter((i) => i.estado === 'listo' && !S.avisoListo.has(`${pedido.id}:${i.id}`));
       if (nuevos.length) {
         nuevos.forEach((i) => S.avisoListo.add(`${pedido.id}:${i.id}`));
         const destino = pedido.tipo === 'MESA'
-          ? `Mesa ${pedido.mesa || pedido.mesa_id || pedido.id}`
+          ? (pedido.mesa || `Mesa ${pedido.mesa_id}`)
           : pedido.tipo === 'LLEVAR'
             ? 'Para llevar'
             : 'Domicilio';
