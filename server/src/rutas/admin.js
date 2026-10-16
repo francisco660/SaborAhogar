@@ -139,7 +139,11 @@ r.get('/mesas', ah(async (_req, res) => {
     SELECT m.id, m.nombre, p.id AS pedido_id, total_pedido(p.id) AS total, p.creado_en,
            (SELECT count(*)::int FROM pedido_item i WHERE i.pedido_id = p.id AND i.estado = 'listo') AS listos,
            (SELECT count(*)::int FROM pedido_item i WHERE i.pedido_id = p.id AND i.estado = 'preparando') AS preparando,
-           (SELECT count(*)::int FROM pedido_item i WHERE i.pedido_id = p.id AND i.estado = 'en_cocina') AS en_cocina
+           (SELECT count(*)::int FROM pedido_item i WHERE i.pedido_id = p.id AND i.estado = 'en_cocina') AS en_cocina,
+           -- Todo entregado y nada más por preparar: solo falta cobrar
+           (EXISTS (SELECT 1 FROM pedido_item i WHERE i.pedido_id = p.id AND i.estado = 'entregado')
+            AND NOT EXISTS (SELECT 1 FROM pedido_item i WHERE i.pedido_id = p.id
+                              AND i.estado IN ('pendiente', 'en_cocina', 'preparando', 'listo'))) AS por_cobrar
       FROM mesa m LEFT JOIN pedido p ON p.mesa_id = m.id AND p.estado = 'abierto'
      WHERE m.activa ORDER BY m.orden, m.nombre`);
   res.json(rows);

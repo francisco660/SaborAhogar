@@ -193,8 +193,8 @@ main#vista { padding: 1.1rem; max-width: 1400px; margin: 0 auto; }
 /* Platos listos: un plato por ítem con vapor que sube */
 .platos-listos { display: flex; justify-content: space-between; width: 100%; padding-top: 1em; margin-top: 0; font-size: 1.15rem; font-size: min(1.15rem, 100cqw / 7.5); line-height: 1; overflow: hidden; }
 .plato { position: relative; display: inline-block; }
-/* El emoji del plato es blanco: se tiñe de café oscuro para que contraste con la mesa */
-.plato b { font-weight: normal; color: transparent; text-shadow: 0 0 0 #2b1d1a; }
+/* Plato blanco con un contorno suave para que se vea sobre la mesa clara */
+.plato b { font-weight: normal; display: inline-block; filter: drop-shadow(0 0 1px rgba(43, 29, 26, 0.55)) drop-shadow(0 1px 1px rgba(43, 29, 26, 0.35)); }
 .plato i { position: absolute; bottom: 70%; width: .16em; height: .5em; border-radius: 50%; background: rgba(140, 120, 110, 0.55); filter: blur(1px); opacity: 0; animation: vapor 1.8s ease-out infinite; }
 .plato i:nth-child(1) { left: 25%; }
 .plato i:nth-child(2) { left: 45%; animation-delay: .6s; }
@@ -209,7 +209,17 @@ main#vista { padding: 1.1rem; max-width: 1400px; margin: 0 auto; }
   25%  { opacity: .9; }
   100% { transform: translateY(-.7em) translateX(.08em) scaleX(1.8); opacity: 0; }
 }
-@media (prefers-reduced-motion: reduce) { .fuegos span, .plato i { animation: none; } }
+/* Pendiente de pago: billetes que se mecen */
+.billetes { display: flex; justify-content: space-between; width: 100%; margin-top: .35rem; font-size: 1.15rem; font-size: min(1.15rem, 100cqw / 7.5); line-height: 1.3; overflow: hidden; }
+.billetes span { display: inline-block; animation: billete 1.4s ease-in-out infinite; }
+.billetes span:nth-child(2n) { animation-delay: -.35s; }
+.billetes span:nth-child(3n) { animation-delay: -.7s; }
+.billetes span:nth-child(5) { animation-delay: -1.05s; }
+@keyframes billete {
+  0%, 100% { transform: translateY(0) rotate(-8deg); }
+  50%      { transform: translateY(-.15em) rotate(8deg) scaleX(.85); }
+}
+@media (prefers-reduced-motion: reduce) { .fuegos span, .plato i, .billetes span { animation: none; } }
 .mesa .chip { white-space: normal; max-width: 100%; line-height: 1.3; margin-top: .35rem; }
 .lista-pedidos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: .8rem; }
 .pedido-card { cursor: pointer; text-align: left; display: block; width: 100%; font-weight: 400; padding: .8rem; min-height: 0; border-radius: 18px; }
