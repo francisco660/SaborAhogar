@@ -212,7 +212,6 @@ main#vista { padding: 1.1rem; max-width: 1400px; margin: 0 auto; }
 .total { display: flex; justify-content: space-between; font-size: 1.35rem; font-weight: 800; padding: .7rem 0; border-top: 2px solid rgba(30,23,22,0.9); margin-top: .5rem; }
 .subtotal { display: flex; justify-content: space-between; color: var(--suave); }
 .etiqueta-seccion { font-size: .76rem; text-transform: uppercase; letter-spacing: .09em; color: var(--suave); font-weight: 800; margin: .75rem 0 .25rem; }
-.barra-movil { display: none; }
 
 /* ─── Cocina ─── */
 .cocina { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; align-items: start; }
@@ -281,13 +280,7 @@ tfoot td { font-weight: 800; border-top: 2px solid rgba(30,23,22,0.85); border-b
 @media (max-width: 900px) {
   .pos, .dos-col { grid-template-columns: minmax(0, 1fr); }
   .cuenta { position: static; }
-  .con-barra-movil { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
-  .cuenta { scroll-margin-bottom: calc(112px + env(safe-area-inset-bottom, 0px)); width: 100%; }
-  .barra-movil {
-    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; padding: .65rem 1rem calc(.65rem + env(safe-area-inset-bottom, 0px));
-    background: linear-gradient(135deg, rgba(30,23,22,0.95), rgba(67,49,46,0.95)); color: #fff; justify-content: space-between; align-items: center; gap: .5rem;
-    border-top: 1px solid rgba(255,255,255,0.08); backdrop-filter: blur(10px);
-  }
+  .cuenta { width: 100%; }
 }
 @media (max-width: 640px) {
   main#vista { padding: .75rem; }

@@ -433,7 +433,6 @@ async function vistaPedido(el, id, tipo, mesaId) {
   }
   S.pedido = null;
   S.catActiva = S.catActiva || S.menu[0]?.id;
-  el.className = 'con-barra-movil';
   el.innerHTML = `
     <div class="pos">
       <section>
@@ -445,8 +444,7 @@ async function vistaPedido(el, id, tipo, mesaId) {
         <div class="prods" id="prods"></div>
       </section>
       <aside class="tarjeta cuenta" id="cuenta"></aside>
-    </div>
-    <div class="barra-movil" id="barra-movil"></div>`;
+    </div>`;
 
   if (id === 'nuevo' && tipo === 'MESA') S.mesas = await api('/mesas');
   pintarProductos();
@@ -462,7 +460,6 @@ async function vistaPedido(el, id, tipo, mesaId) {
       pintarCuenta();
     },
     quitar: (b) => { S.carrito.splice(b.dataset.i, 1); pintarCuenta(); },
-    irCuenta: () => $('#cuenta').scrollIntoView({ behavior: 'smooth', block: 'center' }),
     enviar: enviarPedido,
     itemEstado: async (b) => {
       if (b.dataset.estado === 'anulado') {
@@ -599,9 +596,6 @@ function pintarTotales() {
   const total = (p ? p.total : 0) + totalCarrito() + envio;
   const t = $('#total-cuenta');
   if (t) t.textContent = pesos(total);
-  const n = S.carrito.reduce((s, l) => s + l.cantidad, 0);
-  $('#barra-movil').innerHTML = `<span>${n ? `${n} nuevo(s)` : p ? `Pedido #${p.id}` : 'Pedido vacío'}</span>
-    <b>${pesos(total)}</b><button class="aviso peq" data-acc="irCuenta">Ver cuenta ↓</button>`;
 }
 
 async function pintarCuenta() {
