@@ -113,7 +113,7 @@ r.get('/cocina', permite('cocina', 'cajero', 'mesero'), ah(async (_req, res) => 
       JOIN pedido p ON p.id = i.pedido_id
       LEFT JOIN mesa m ON m.id = p.mesa_id
       LEFT JOIN cliente cl ON cl.id = p.cliente_id
-     WHERE i.estado = 'en_cocina' AND p.estado <> 'anulado'
+     WHERE i.estado IN ('en_cocina', 'preparando') AND p.estado <> 'anulado'
      GROUP BY p.id, m.nombre, cl.nombre
      ORDER BY min(i.enviado_en)`);
   res.json(rows);
@@ -197,11 +197,12 @@ r.patch('/pedidos/:id', permite('mesero', 'cajero'), ah(async (req, res) => {
   res.json(await obtenerPedido(pool, req.params.id));
 }));
 
-// Cambiar estado de un ítem: listo (cocina), entregado (mesero), anulado (caja)
+// Cambiar estado de un ítem: preparando/listo (cocina), entregado (mesero), anulado (caja)
 r.patch('/items/:id', ah(async (req, res) => {
   const { estado } = req.body;
   const rol = req.usuario.rol;
   const puede = {
+    preparando: ['admin', 'cocina', 'cajero'],
     listo: ['admin', 'cocina', 'cajero'],
     entregado: ['admin', 'mesero', 'cajero'],
     anulado: ['admin', 'cajero']
@@ -215,10 +216,18 @@ r.patch('/items/:id', ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Empezar a preparar todos los ítems en cocina de un pedido
+r.post('/pedidos/:id/preparar', permite('cocina', 'cajero'), ah(async (req, res) => {
+  await pool.query(
+    `UPDATE pedido_item SET estado = 'preparando' WHERE pedido_id = $1 AND estado = 'en_cocina'`, [req.params.id]);
+  avisar('pedidos', { id: Number(req.params.id) });
+  res.json({ ok: true });
+}));
+
 // Marcar listos todos los ítems en cocina de un pedido
 r.post('/pedidos/:id/listo', permite('cocina', 'cajero'), ah(async (req, res) => {
   await pool.query(
-    `UPDATE pedido_item SET estado = 'listo' WHERE pedido_id = $1 AND estado = 'en_cocina'`, [req.params.id]);
+    `UPDATE pedido_item SET estado = 'listo' WHERE pedido_id = $1 AND estado IN ('en_cocina', 'preparando')`, [req.params.id]);
   avisar('pedidos', { id: Number(req.params.id), listo: true });
   res.json({ ok: true });
 }));

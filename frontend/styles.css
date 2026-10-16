@@ -156,6 +156,7 @@ main#vista { padding: 1.1rem; max-width: 1400px; margin: 0 auto; }
 .chip { display: inline-block; font-size: .72rem; font-weight: 800; padding: .14rem .55rem; border-radius: 999px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
 .chip.pendiente { background: rgba(109, 118, 130, 0.12); color: #4d596a; }
 .chip.en_cocina { background: rgba(255, 144, 79, 0.14); color: #b95d17; }
+.chip.preparando { background: rgba(255, 190, 61, 0.22); color: #9a5a00; }
 .chip.listo { background: rgba(35, 167, 109, 0.12); color: #138a59; }
 .chip.entregado { background: rgba(46, 115, 255, 0.12); color: #1d5fe0; }
 .chip.anulado { background: rgba(255, 90, 54, 0.12); color: var(--rojo); text-decoration: line-through; }
@@ -221,6 +222,7 @@ main#vista { padding: 1.1rem; max-width: 1400px; margin: 0 auto; }
 .comanda.muy-tarde header { background: linear-gradient(135deg, var(--rojo), #d85538); }
 .comanda .cuerpo { padding: .5rem .8rem .85rem; }
 .comanda .it { display: flex; gap: .65rem; padding: .55rem 0; border-bottom: 1px solid rgba(80,47,40,0.12); align-items: center; }
+.comanda .it.preparando { background: rgba(255, 190, 61, 0.12); border-radius: 10px; padding-left: .4rem; padding-right: .4rem; }
 .comanda .it .c { font-size: 1.45rem; font-weight: 900; color: var(--rojo); min-width: 2rem; }
 .comanda .it .n { font-weight: 800; font-size: 1.02rem; }
 .comanda .it .o { font-size: .88rem; }

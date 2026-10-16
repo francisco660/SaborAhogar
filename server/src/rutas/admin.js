@@ -137,7 +137,9 @@ r.delete('/usuarios/:id', admin, ah(async (req, res) => {
 r.get('/mesas', ah(async (_req, res) => {
   const { rows } = await pool.query(`
     SELECT m.id, m.nombre, p.id AS pedido_id, total_pedido(p.id) AS total, p.creado_en,
-           (SELECT count(*)::int FROM pedido_item i WHERE i.pedido_id = p.id AND i.estado = 'listo') AS listos
+           (SELECT count(*)::int FROM pedido_item i WHERE i.pedido_id = p.id AND i.estado = 'listo') AS listos,
+           (SELECT count(*)::int FROM pedido_item i WHERE i.pedido_id = p.id AND i.estado = 'preparando') AS preparando,
+           (SELECT count(*)::int FROM pedido_item i WHERE i.pedido_id = p.id AND i.estado = 'en_cocina') AS en_cocina
       FROM mesa m LEFT JOIN pedido p ON p.mesa_id = m.id AND p.estado = 'abierto'
      WHERE m.activa ORDER BY m.orden, m.nombre`);
   res.json(rows);

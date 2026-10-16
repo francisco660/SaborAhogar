@@ -21,7 +21,7 @@ const fechaHora = (d) => (d ? new Date(d).toLocaleString('es-CO', { dateStyle: '
 const minutos = (d) => Math.max(0, Math.floor((Date.now() - new Date(d)) / 60000));
 const UNIDAD = { g: 'g', ml: 'ml', und: 'und' };
 const ROL = { admin: 'Administrador', cajero: 'Caja', mesero: 'Mesero', cocina: 'Cocina', domiciliario: 'Domiciliario' };
-const ESTADO_ITEM = { pendiente: 'Sin enviar', en_cocina: 'En cocina', listo: 'Listo', entregado: 'Entregado', anulado: 'Anulado' };
+const ESTADO_ITEM = { pendiente: 'Sin enviar', en_cocina: 'En cocina', preparando: 'En preparación', listo: 'Listo', entregado: 'Entregado', anulado: 'Anulado' };
 const TIPO = { MESA: 'Mesa', LLEVAR: 'Para llevar', DOMICILIO: 'Domicilio' };
 const MEDIOS = ['EFECTIVO', 'NEQUI', 'DAVIPLATA', 'TARJETA', 'TRANSFERENCIA'];
 const MEDIO = { EFECTIVO: 'Efectivo', NEQUI: 'Nequi', DAVIPLATA: 'Daviplata', TARJETA: 'Tarjeta', TRANSFERENCIA: 'Transferencia', CREDITO: 'Crédito' };
@@ -380,7 +380,7 @@ async function vistaPedidos(el) {
   const resumenCocina = (p) => {
     const c = {};
     p.items.forEach((i) => { c[i.estado] = (c[i.estado] || 0) + 1; });
-    return ['pendiente', 'en_cocina', 'listo'].filter((k) => c[k])
+    return ['pendiente', 'en_cocina', 'preparando', 'listo'].filter((k) => c[k])
       .map((k) => `<span class="chip ${k}">${c[k]} ${ESTADO_ITEM[k]}</span>`).join(' ');
   };
   el.innerHTML = `
@@ -397,6 +397,8 @@ async function vistaPedidos(el) {
           <span class="nom">${esc(m.nombre)}</span>
           <span class="det">${m.pedido_id ? `${pesos(m.total)} · ${minutos(m.creado_en)} min` : 'Libre'}</span>
           ${m.listos ? `<span class="chip listo">${m.listos} listo${m.listos > 1 ? 's' : ''} para entregar</span>` : ''}
+          ${m.preparando ? `<span class="chip preparando">🔥 ${m.preparando} en preparación</span>` : ''}
+          ${m.en_cocina ? `<span class="chip en_cocina">${m.en_cocina} en cocina</span>` : ''}
         </button>`).join('')}
     </div>
     <div class="seccion">
@@ -646,7 +648,7 @@ async function pintarCuenta() {
     if (p && p.estado !== 'anulado') {
       if (i.estado === 'pendiente' && editable) acciones.push(`<button class="peq peligro" data-acc="borrarItem" data-id="${i.id}">Borrar</button>`);
       if (i.estado === 'listo' && tiene('mesero', 'cajero')) acciones.push(`<button class="peq exito" data-acc="itemEstado" data-estado="entregado" data-id="${i.id}">Entregar</button>`);
-      if (i.estado === 'en_cocina' && tiene('cajero')) acciones.push(`<button class="peq" data-acc="itemEstado" data-estado="listo" data-id="${i.id}">Listo</button>`);
+      if (['en_cocina', 'preparando'].includes(i.estado) && tiene('cajero')) acciones.push(`<button class="peq" data-acc="itemEstado" data-estado="listo" data-id="${i.id}">Listo</button>`);
       if (!['pendiente', 'anulado'].includes(i.estado) && editable && tiene('cajero')) acciones.push(`<button class="peq peligro" data-acc="itemEstado" data-estado="anulado" data-id="${i.id}" title="Anular">✕</button>`);
     }
     return `<div class="linea ${i.estado === 'anulado' ? 'anulada' : ''}">
@@ -792,7 +794,7 @@ async function vistaCocina(el) {
   if (!S.cocinaVistos.size) S.cocinaVistos.add(0);
 
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Cocina</h2><span class="suave">${comandas.length} pedido(s) in preparación</span></div>
+    <div class="titulo-vista"><h2>Cocina</h2><span class="suave">${comandas.length} pedido(s) en cocina</span></div>
     ${comandas.length ? `<div class="cocina">${comandas.map((c) => {
       const min = minutos(c.desde);
       const destino = c.tipo === 'MESA' ? esc(c.mesa) : c.tipo === 'DOMICILIO' ? '🛵 Domicilio' : '🥡 Para llevar';
@@ -800,18 +802,23 @@ async function vistaCocina(el) {
         <header><b>${destino} · #${c.id}</b><span>${min} min</span></header>
         <div class="cuerpo">
           ${c.cliente ? `<div class="suave chico" style="padding-top:.3rem">${esc(c.cliente)}</div>` : ''}
-          ${c.items.map((i) => `<div class="it">
+          ${c.items.map((i) => `<div class="it ${i.estado}">
             <span class="c">${i.cantidad}</span>
             <div class="crece"><div class="n">${esc(i.nombre)}</div>
               ${i.opciones.length ? `<div class="o">${esc(i.opciones.join(' · '))}</div>` : ''}
-              ${i.nota ? `<span class="nota">${esc(i.nota)}</span>` : ''}</div>
+              ${i.nota ? `<span class="nota">${esc(i.nota)}</span>` : ''}
+              ${i.estado === 'preparando' ? '<span class="chip preparando">🔥 En preparación</span>' : ''}</div>
+            ${i.estado === 'en_cocina' ? `<button class="peq icono" data-acc="preparar" data-id="${i.id}" aria-label="Empezar a preparar" title="Empezar a preparar">🔥</button>` : ''}
             <button class="peq exito icono" data-acc="listo" data-id="${i.id}" aria-label="Listo">✓</button></div>`).join('')}
           ${c.nota ? `<div class="nota-ped">${esc(c.nota)}</div>` : ''}
+          ${c.items.some((i) => i.estado === 'en_cocina') ? `<button class="aviso" style="width:100%;margin-top:.6rem" data-acc="prepararTodo" data-id="${c.id}">🔥 Empezar a preparar</button>` : ''}
           <button class="exito" style="width:100%;margin-top:.6rem" data-acc="todo" data-id="${c.id}">Todo listo</button>
         </div></article>`;
     }).join('')}</div>` : '<p class="vacio">🍳 No hay pedidos pendientes. ¡Buen trabajo!</p>'}`;
 
   S.acc = {
+    preparar: async (b) => { await api(`/items/${b.dataset.id}`, { method: 'PATCH', body: { estado: 'preparando' } }); vistaCocina(el); },
+    prepararTodo: async (b) => { await api(`/pedidos/${b.dataset.id}/preparar`, { method: 'POST' }); vistaCocina(el); },
     listo: async (b) => { await api(`/items/${b.dataset.id}`, { method: 'PATCH', body: { estado: 'listo' } }); vistaCocina(el); },
     todo: async (b) => { await api(`/pedidos/${b.dataset.id}/listo`, { method: 'POST' }); vistaCocina(el); }
   };
@@ -829,7 +836,7 @@ async function vistaDomicilios(el) {
   const pend = lista.filter((p) => !p.entregado_en);
   const entregados = lista.filter((p) => p.entregado_en);
   const cocina = (p) => {
-    if (p.items.some((i) => i.estado === 'en_cocina' || i.estado === 'pendiente')) return '<span class="chip en_cocina">En cocina</span>';
+    if (p.items.some((i) => ['pendiente', 'en_cocina', 'preparando'].includes(i.estado))) return '<span class="chip en_cocina">En cocina</span>';
     return '<span class="chip listo">Listo para salir</span>';
   };
   const pago = (p) => p.estado === 'pagado'
