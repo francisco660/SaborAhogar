@@ -396,7 +396,7 @@ async function vistaPedidos(el) {
         <button class="mesa ${m.pedido_id ? 'ocupada' : ''} ${m.listos ? 'alerta-pedido' : ''}" data-acc="mesa" data-id="${m.id}" data-pedido="${m.pedido_id || ''}">
           <span class="nom">${esc(m.nombre)}</span>
           <span class="det">${m.pedido_id ? `${pesos(m.total)} · ${minutos(m.creado_en)} min` : 'Libre'}</span>
-          ${m.listos ? `<span class="chip listo">${m.listos} listo${m.listos > 1 ? 's' : ''} para entregar</span>` : ''}
+          ${m.listos ? `<span class="platos-listos" title="${m.listos} listo${m.listos > 1 ? 's' : ''} para entregar" aria-label="${m.listos} listo${m.listos > 1 ? 's' : ''} para entregar">${'<span class="plato"><i></i><i></i><i></i>🍽️</span>'.repeat(Math.min(m.listos, 5))}</span>` : ''}
           ${m.preparando ? `<span class="fuegos" title="${m.preparando} en preparación" aria-label="${m.preparando} en preparación">${'<span>🔥</span>'.repeat(6)}</span>` : ''}
           ${m.en_cocina ? `<span class="chip en_cocina">${m.en_cocina} en cocina</span>` : ''}
         </button>`).join('')}
