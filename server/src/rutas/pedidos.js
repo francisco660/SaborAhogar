@@ -308,6 +308,13 @@ r.get('/domiciliarios', ah(async (_req, res) => {
 // { domiciliario_id } asigna y despacha ; { entregado: true } marca entregado
 r.post('/pedidos/:id/domicilio', permite('cajero', 'domiciliario'), ah(async (req, res) => {
   const id = Number(req.params.id);
+  // No se despacha ni se entrega lo que la cocina aún no ha terminado
+  const { rows: [c] } = await pool.query(
+    `SELECT count(*) FILTER (WHERE estado IN ('pendiente', 'en_cocina', 'preparando'))::int AS en_cocina,
+            count(*) FILTER (WHERE estado IN ('listo', 'entregado'))::int AS listos
+       FROM pedido_item WHERE pedido_id = $1`, [id]);
+  if (c.en_cocina) throw new ErrorApp('El pedido aún está en cocina; espere a que lo marquen como listo');
+  if (!c.listos) throw new ErrorApp('El pedido no tiene platos listos para entregar');
   if (req.body.entregado) {
     const { rowCount } = await pool.query(
       `UPDATE pedido SET entregado_en = now() WHERE id = $1 AND tipo = 'DOMICILIO'

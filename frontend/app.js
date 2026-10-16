@@ -862,10 +862,10 @@ async function vistaDomicilios(el) {
   const lista = todos.filter((p) => p.tipo === 'DOMICILIO' && p.estado !== 'anulado');
   const pend = lista.filter((p) => !p.entregado_en);
   const entregados = lista.filter((p) => p.entregado_en);
-  const cocina = (p) => {
-    if (p.items.some((i) => ['pendiente', 'en_cocina', 'preparando'].includes(i.estado))) return '<span class="chip en_cocina">En cocina</span>';
-    return '<span class="chip listo">Listo para salir</span>';
-  };
+  const enCocina = (p) => p.items.some((i) => ['pendiente', 'en_cocina', 'preparando'].includes(i.estado));
+  const cocina = (p) => enCocina(p)
+    ? `<span class="chip en_cocina">${p.items.some((i) => i.estado === 'preparando') ? '🔥 En preparación' : 'En cocina'}</span>`
+    : '<span class="chip listo">Listo para salir</span>';
   const pago = (p) => p.estado === 'pagado'
     ? (p.pagos.some((x) => x.por_liquidar) ? '<span class="chip abierto">Cobrar en efectivo</span>' : '<span class="chip pagado">Pagado</span>')
     : '<span class="chip abierto">Sin cobrar</span>';
@@ -879,11 +879,12 @@ async function vistaDomicilios(el) {
       <div class="fila" style="margin-top:.4rem">${cocina(p)} ${pago(p)}
         ${p.domiciliario ? `<span class="chip entregado">🛵 ${esc(p.domiciliario)} ${hora(p.despachado_en)}</span>` : ''}</div>
       <div class="fila" style="margin-top:.6rem">
-        ${!esDomi ? `<select data-sel="${p.id}" style="max-width:200px"><option value="">Domiciliario…</option>
+        ${!esDomi && !enCocina(p) ? `<select data-sel="${p.id}" style="max-width:200px"><option value="">Domiciliario…</option>
           ${domis.map((d) => `<option value="${d.id}" ${d.id === p.domiciliario_id ? 'selected' : ''}>${esc(d.nombre)}</option>`).join('')}</select>
-          <button class="peq aviso" data-acc="despachar" data-id="${p.id}">Despachar</button>
-          <a class="btn peq" href="#pedido/${p.id}">Abrir</a>` : ''}
-        ${p.domiciliario_id && !p.entregado_en ? `<button class="peq exito" data-acc="entregado" data-id="${p.id}">Entregado</button>` : ''}
+          <button class="peq aviso" data-acc="despachar" data-id="${p.id}">Despachar</button>` : ''}
+        ${!esDomi ? `<a class="btn peq" href="#pedido/${p.id}">Abrir</a>` : ''}
+        ${enCocina(p) ? '<span class="suave chico">⏳ Esperando a cocina para despachar</span>' : ''}
+        ${p.domiciliario_id && !p.entregado_en && !enCocina(p) ? `<button class="peq exito" data-acc="entregado" data-id="${p.id}">Entregado</button>` : ''}
         ${domicilioEditable(p) ? `<button class="peq" data-acc="editarCliente" data-id="${p.id}">✏️ Editar datos</button>` : ''}
       </div>
     </div>`;
