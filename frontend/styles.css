@@ -191,14 +191,19 @@ main#vista { padding: 1.1rem; max-width: 1400px; margin: 0 auto; }
   100% { transform: scale(1.06, .94) rotate(-2deg); filter: brightness(.95); }
 }
 /* Platos listos: un plato por ítem con vapor que sube */
-.platos-listos { display: flex; gap: .25em; width: 100%; padding-top: 1em; margin-top: 0; font-size: 1.25rem; font-size: min(1.25rem, 100cqw / 6.5); line-height: 1; overflow: hidden; }
+.platos-listos { display: flex; justify-content: space-between; width: 100%; padding-top: 1em; margin-top: 0; font-size: 1.15rem; font-size: min(1.15rem, 100cqw / 7.5); line-height: 1; overflow: hidden; }
 .plato { position: relative; display: inline-block; }
+/* El emoji del plato es blanco: se tiñe de café oscuro para que contraste con la mesa */
+.plato b { font-weight: normal; color: transparent; text-shadow: 0 0 0 #2b1d1a; }
 .plato i { position: absolute; bottom: 70%; width: .16em; height: .5em; border-radius: 50%; background: rgba(140, 120, 110, 0.55); filter: blur(1px); opacity: 0; animation: vapor 1.8s ease-out infinite; }
 .plato i:nth-child(1) { left: 25%; }
 .plato i:nth-child(2) { left: 45%; animation-delay: .6s; }
 .plato i:nth-child(3) { left: 65%; animation-delay: 1.2s; }
 .plato:nth-child(2) i { animation-duration: 2s; }
 .plato:nth-child(3) i { animation-duration: 1.6s; }
+.plato:nth-child(4) i { animation-duration: 2.2s; }
+.plato:nth-child(5) i { animation-duration: 1.7s; }
+.plato:nth-child(6) i { animation-duration: 1.9s; }
 @keyframes vapor {
   0%   { transform: translateY(0) scaleX(1); opacity: 0; }
   25%  { opacity: .9; }
