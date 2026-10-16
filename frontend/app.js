@@ -294,32 +294,32 @@ async function navegar() {
   }
 }
 
-// ─── Menú desplegable de acciones (⋯) ───────────────────────────────────────
-// items: [{ acc, id, texto, peligro, extra }] → <details> con botones data-acc
-const menuAcciones = (items) => `<details class="menu-acc">
-  <summary class="btn peq icono" aria-label="Acciones" title="Acciones">⋯</summary>
-  <div class="menu-lista">${items.map((i) => `<button class="${i.peligro ? 'peligro' : ''}" data-acc="${i.acc}" data-id="${i.id}" ${i.extra || ''}>${i.texto}</button>`).join('')}</div>
-</details>`;
-const cerrarMenus = (salvo) => $$('details.menu-acc[open]').forEach((d) => { if (d !== salvo) d.open = false; });
-// Al abrir, el menú flota sobre la página para que la tabla no lo recorte
-document.addEventListener('toggle', (e) => {
-  const d = e.target;
-  if (!d.matches?.('details.menu-acc') || !d.open) return;
-  cerrarMenus(d);
-  const r = d.querySelector('summary').getBoundingClientRect();
-  const lista = d.querySelector('.menu-lista');
-  lista.style.top = `${r.bottom + 4}px`;
-  lista.style.right = `${Math.max(8, innerWidth - r.right)}px`;
-  const alto = lista.offsetHeight;
-  if (r.bottom + 4 + alto > innerHeight - 8) lista.style.top = `${Math.max(8, r.top - alto - 4)}px`;
-}, true);
+// ─── Menú de acciones (⋯) ───────────────────────────────────────────────────
+// items: [{ acc, id, texto, peligro, extra }]. El botón ⋯ abre una ventanita en el
+// centro de la pantalla; cada opción ejecuta S.acc[acc] como un botón normal.
+const menuAcciones = (items, titulo = 'Acciones') => `<button class="peq icono menu-btn" data-menu aria-label="Acciones" title="Acciones">⋯</button>
+  <template><div class="menu-titulo">${esc(titulo)}</div>${items.map((i) => `<button class="${i.peligro ? 'peligro' : ''}" data-acc="${i.acc}" data-id="${i.id}" ${i.extra || ''}>${i.texto}</button>`).join('')}</template>`;
+function abrirMenuAcciones(boton) {
+  const fondo = document.createElement('div');
+  fondo.className = 'menu-fondo';
+  fondo.innerHTML = '<div class="menu-lista" role="menu"></div>';
+  fondo.firstElementChild.append(boton.nextElementSibling.content.cloneNode(true));
+  const cerrar = () => { fondo.remove(); document.removeEventListener('keydown', tecla); };
+  const tecla = (e) => { if (e.key === 'Escape') cerrar(); };
+  document.addEventListener('keydown', tecla);
+  fondo.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-acc]');
+    if (e.target === fondo) return cerrar();
+    if (!b) return;
+    cerrar();
+    if (S.acc[b.dataset.acc]) ejecutar(() => S.acc[b.dataset.acc](b));
+  });
+  document.body.appendChild(fondo);
+}
 document.addEventListener('click', (e) => {
-  const d = e.target.closest('details.menu-acc');
-  if (!d) return cerrarMenus();
-  if (e.target.closest('.menu-lista [data-acc]')) d.open = false;
+  const b = e.target.closest('[data-menu]');
+  if (b) abrirMenuAcciones(b);
 });
-addEventListener('scroll', () => cerrarMenus(), true);
-addEventListener('resize', () => cerrarMenus());
 
 // Clics en la vista: <button data-acc="nombre" data-id="...">
 $('#vista').addEventListener('click', (e) => {
@@ -1436,7 +1436,7 @@ async function vistaAjustes(el) {
             { acc: 'claveUsuario', id: u.id, texto: '🔑 Cambiar clave' },
             { acc: 'toggleUsuario', id: u.id, texto: u.activo ? '⏸️ Desactivar' : '▶️ Activar', extra: `data-activo="${u.activo}"` },
             { acc: 'eliminarUsuario', id: u.id, texto: '🗑️ Eliminar', peligro: true }
-          ])}</td></tr>`).join('')}</tbody></table></div>
+          ], u.nombre)}</td></tr>`).join('')}</tbody></table></div>
         <form data-submit="usuario" class="admin-form">
           <div class="etiqueta-seccion">Crear usuario</div>
           <div class="campos">
@@ -1467,7 +1467,7 @@ async function vistaAjustes(el) {
             { acc: 'editarEmpleado', id: e.id, texto: '✏️ Editar' },
             { acc: 'toggleEmpleado', id: e.id, texto: e.activo ? '⏸️ Desactivar' : '▶️ Activar', extra: `data-activo="${e.activo}"` },
             { acc: 'eliminarEmpleado', id: e.id, texto: '🗑️ Eliminar', peligro: true }
-          ])}</td></tr>`).join('') || '<tr><td colspan="5" class="vacio">Sin empleados registrados.</td></tr>'}</tbody></table></div>
+          ], e.nombre)}</td></tr>`).join('') || '<tr><td colspan="5" class="vacio">Sin empleados registrados.</td></tr>'}</tbody></table></div>
         <form data-submit="empleado" class="admin-form">
           <div class="etiqueta-seccion">Agregar empleado</div>
           <div class="campos">
