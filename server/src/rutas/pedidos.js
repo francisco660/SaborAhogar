@@ -129,6 +129,20 @@ r.get('/clientes', ah(async (req, res) => {
 }));
 
 // ─── Crear y modificar ──────────────────────────────────────────────────────
+// Crea o actualiza el cliente de un domicilio (por teléfono) y devuelve su id y dirección
+async function guardarCliente(c, cl = {}) {
+  const tel = String(cl.telefono || '').trim();
+  if (!tel || !cl.direccion?.trim()) throw new ErrorApp('El domicilio necesita teléfono y dirección');
+  const { rows: [row] } = await c.query(
+    `INSERT INTO cliente (telefono, nombre, direccion, barrio) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (telefono) DO UPDATE SET
+       nombre = coalesce(EXCLUDED.nombre, cliente.nombre),
+       direccion = EXCLUDED.direccion, barrio = coalesce(EXCLUDED.barrio, cliente.barrio)
+     RETURNING id`,
+    [tel, cl.nombre?.trim() || null, cl.direccion.trim(), cl.barrio?.trim() || null]);
+  return { clienteId: row.id, direccion: cl.direccion.trim() };
+}
+
 // { tipo, mesa_id, nombre_cliente, cliente:{telefono,nombre,direccion,barrio},
 //   costo_envio, nota, items:[{producto_id,cantidad,nota,opciones:[id]}], enviar }
 r.post('/pedidos', permite('mesero', 'cajero'), ah(async (req, res) => {
@@ -137,20 +151,7 @@ r.post('/pedidos', permite('mesero', 'cajero'), ah(async (req, res) => {
   const id = await tx(async (c) => {
     let clienteId = null;
     let direccion = null;
-    if (b.tipo === 'DOMICILIO') {
-      const cl = b.cliente || {};
-      const tel = String(cl.telefono || '').trim();
-      if (!tel || !cl.direccion?.trim()) throw new ErrorApp('El domicilio necesita teléfono y dirección');
-      const { rows: [row] } = await c.query(
-        `INSERT INTO cliente (telefono, nombre, direccion, barrio) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (telefono) DO UPDATE SET
-           nombre = coalesce(EXCLUDED.nombre, cliente.nombre),
-           direccion = EXCLUDED.direccion, barrio = coalesce(EXCLUDED.barrio, cliente.barrio)
-         RETURNING id`,
-        [tel, cl.nombre?.trim() || null, cl.direccion.trim(), cl.barrio?.trim() || null]);
-      clienteId = row.id;
-      direccion = cl.direccion.trim();
-    }
+    if (b.tipo === 'DOMICILIO') ({ clienteId, direccion } = await guardarCliente(c, b.cliente));
     if (b.tipo === 'MESA') {
       const { rows } = await c.query(
         `SELECT id FROM pedido WHERE mesa_id = $1 AND estado = 'abierto'`, [b.mesa_id]);
@@ -195,6 +196,21 @@ r.patch('/pedidos/:id', permite('mesero', 'cajero'), ah(async (req, res) => {
     [req.params.id, nota, costo_envio, mesa_id]);
   avisar('pedidos', { id: Number(req.params.id) });
   res.json(await obtenerPedido(pool, req.params.id));
+}));
+
+// Corregir teléfono, nombre, dirección o barrio de un domicilio aún no entregado
+r.patch('/pedidos/:id/cliente', permite('mesero', 'cajero', 'domiciliario'), ah(async (req, res) => {
+  const id = Number(req.params.id);
+  await tx(async (c) => {
+    const { rows: [p] } = await c.query(`SELECT tipo, estado, entregado_en FROM pedido WHERE id = $1 FOR UPDATE`, [id]);
+    if (!p) throw new ErrorApp('Pedido no encontrado', 404);
+    if (p.tipo !== 'DOMICILIO') throw new ErrorApp('Solo los domicilios tienen datos de entrega');
+    if (p.estado === 'anulado' || p.entregado_en) throw new ErrorApp('Este domicilio ya fue entregado o anulado');
+    const { clienteId, direccion } = await guardarCliente(c, req.body);
+    await c.query(`UPDATE pedido SET cliente_id = $2, direccion_entrega = $3 WHERE id = $1`, [id, clienteId, direccion]);
+  });
+  avisar('pedidos', { id });
+  res.json(await obtenerPedido(pool, id));
 }));
 
 // Cambiar estado de un ítem: preparando/listo (cocina), entregado (mesero), anulado (caja)

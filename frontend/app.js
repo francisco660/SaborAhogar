@@ -468,6 +468,7 @@ async function vistaPedido(el, id, tipo, mesaId) {
     },
     quitar: (b) => { S.carrito.splice(b.dataset.i, 1); pintarCuenta(); },
     enviar: enviarPedido,
+    editarCliente: () => modalDatosDomicilio(S.pedido, pintarCuenta),
     itemEstado: async (b) => {
       if (b.dataset.estado === 'anulado') {
         const ok = await confirmar('¿Anular este ítem? Si ya estaba preparado, su costo queda como merma.', { boton: 'Anular', peligro: true });
@@ -578,6 +579,30 @@ function agregarProducto(p) {
   });
 }
 
+// Corregir teléfono / dirección de un domicilio que aún no se ha entregado
+const domicilioEditable = (p) => p.tipo === 'DOMICILIO' && p.estado !== 'anulado' && !p.entregado_en;
+function modalDatosDomicilio(p, listo) {
+  abrirModal(`
+    ${cabeceraModal(`Datos del domicilio #${p.id}`)}
+    <form>
+      <div class="campos">
+        <div><label>Teléfono *</label><input name="telefono" inputmode="tel" value="${esc(p.telefono || '')}" required autofocus></div>
+        <div><label>Nombre</label><input name="nombre" value="${esc(p.cliente || '')}"></div>
+        <div style="grid-column:1/-1"><label>Dirección *</label><input name="direccion" value="${esc(p.direccion_entrega || '')}" required></div>
+        <div><label>Barrio</label><input name="barrio" value="${esc(p.barrio || '')}"></div>
+      </div>
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar</button></div>
+    </form>`, {
+    submit: async (f, _m, cerrar) => {
+      await api(`/pedidos/${p.id}/cliente`, { method: 'PATCH', body: {
+        telefono: f.telefono.value, nombre: f.nombre.value, direccion: f.direccion.value, barrio: f.barrio.value } });
+      cerrar();
+      toast('Datos del domicilio actualizados', 'ok');
+      listo();
+    }
+  });
+}
+
 let buscarClienteT;
 function buscarCliente(tel) {
   clearTimeout(buscarClienteT);
@@ -621,6 +646,7 @@ async function pintarCuenta() {
         ${p.cliente || p.nombre_cliente ? ` · ${esc(p.cliente || p.nombre_cliente)}` : ''}
         ${p.telefono ? ` · ${esc(p.telefono)}` : ''}</div>
       ${p.direccion_entrega ? `<div class="chico">📍 ${esc(p.direccion_entrega)} ${esc(p.barrio || '')}</div>` : ''}
+      ${domicilioEditable(p) && tiene('mesero', 'cajero') ? '<button class="peq" data-acc="editarCliente" style="margin-top:.35rem">✏️ Editar teléfono / dirección</button>' : ''}
       ${p.nota ? `<div class="chico"><b>Nota:</b> ${esc(p.nota)}</div>` : ''}`;
   } else {
     const n = S.nuevo;
@@ -858,6 +884,7 @@ async function vistaDomicilios(el) {
           <button class="peq aviso" data-acc="despachar" data-id="${p.id}">Despachar</button>
           <a class="btn peq" href="#pedido/${p.id}">Abrir</a>` : ''}
         ${p.domiciliario_id && !p.entregado_en ? `<button class="peq exito" data-acc="entregado" data-id="${p.id}">Entregado</button>` : ''}
+        ${domicilioEditable(p) ? `<button class="peq" data-acc="editarCliente" data-id="${p.id}">✏️ Editar datos</button>` : ''}
       </div>
     </div>`;
   el.innerHTML = `
@@ -877,6 +904,7 @@ async function vistaDomicilios(el) {
       toast('Despachado', 'ok');
       vistaDomicilios(el);
     },
+    editarCliente: (b) => modalDatosDomicilio(lista.find((p) => p.id === Number(b.dataset.id)), () => vistaDomicilios(el)),
     entregado: async (b) => {
       await api(`/pedidos/${b.dataset.id}/domicilio`, { method: 'POST', body: { entregado: true } });
       toast('Marcado como entregado', 'ok');
