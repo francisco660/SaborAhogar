@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { pool, tx } from '../db.js';
 import { permite } from '../auth.js';
 import { ah, ErrorApp } from '../util.js';
+import { avisar } from '../eventos.js';
 
 const r = Router();
 
@@ -68,6 +69,7 @@ r.patch('/productos/:id', admin, ah(async (req, res) => {
             activo = coalesce($6, activo), orden = coalesce($7, orden)
       WHERE id = $1`,
     [req.params.id, categoria_id, nombre, precio, descripcion, activo, orden]);
+  avisar('menu');
   res.json({ ok: true });
 }));
 
@@ -104,6 +106,7 @@ r.post('/grupos/:id/opciones', admin, ah(async (req, res) => {
     `INSERT INTO opcion (grupo_id, nombre, precio_extra, orden)
      VALUES ($1, $2, $3, (SELECT coalesce(max(orden),0) + 1 FROM opcion WHERE grupo_id = $1)) RETURNING *`,
     [req.params.id, nombre, precio_extra]);
+  avisar('menu');
   res.json(rows[0]);
 }));
 
@@ -113,6 +116,7 @@ r.patch('/opciones/:id', admin, ah(async (req, res) => {
     `UPDATE opcion SET nombre = coalesce($2, nombre), precio_extra = coalesce($3, precio_extra),
             activo = coalesce($4, activo) WHERE id = $1`,
     [req.params.id, nombre, precio_extra, activo]);
+  avisar('menu');
   res.json({ ok: true });
 }));
 

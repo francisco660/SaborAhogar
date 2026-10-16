@@ -268,6 +268,9 @@ tfoot td { font-weight: 800; border-top: 2px solid rgba(30,23,22,0.85); border-b
 .grupo-op { background: rgba(255,255,255,0.6); border: 1px solid var(--borde); border-radius: 14px; padding: .7rem .8rem; margin-bottom: .75rem; }
 .grupo-op legend { font-weight: 800; padding: 0 .35rem; }
 .grupo-op .check { padding: .38rem 0; }
+.menu-dia { margin-bottom: 1rem; }
+.menu-dia .grupo-op { margin-top: 1rem; }
+.opciones-dia { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 1rem; }
 
 /* ─── Avisos ─── */
 #toasts { position: fixed; bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); z-index: 100; display: grid; gap: .6rem; width: min(92vw, 420px); }

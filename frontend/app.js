@@ -356,6 +356,10 @@ function abrirEventos() {
   });
   fuente.addEventListener('pedidos', refrescar);
   fuente.addEventListener('caja', refrescar);
+  fuente.addEventListener('menu', () => {
+    S.menu = null;
+    if (S.vista?.nombre === 'pedido') cargarMenu().then(() => $('#prods') && pintarProductos()).catch(() => {});
+  });
 }
 function cerrarEventos() {
   if (fuente) fuente.close();
@@ -1215,9 +1219,37 @@ async function modalGasto(listo) {
 
 // ═══ VISTA: Menú (administración) ════════════════════════════════════════════
 async function vistaMenu(el) {
-  const menu = await api('/menu?todo=1');
+  const [menu, insumos] = await Promise.all([api('/menu?todo=1'), api('/insumos')]);
+  // Productos del almuerzo que cambian cada día (proteínas, sopa, precio)
+  const delDia = menu.find((c) => c.nombre === 'Almuerzo')?.productos.filter((p) => p.activo) || [];
+  const opcionesInsumo = insumos.filter((i) => i.activo)
+    .map((i) => `<option value="${i.id}">${esc(i.nombre)} (${esc(i.unidad)})</option>`).join('');
+  const tarjetaDia = (p) => `
+    <div class="tarjeta menu-dia">
+      <h3>${esc(p.nombre)} de hoy</h3>
+      <form class="campos" data-submit="guardarDia" data-id="${p.id}">
+        <div style="grid-column: 1 / -1"><label>Descripción (sopa, acompañantes…)</label>
+          <input name="descripcion" value="${esc(p.descripcion || '')}"></div>
+        <div><label>Precio</label><input name="precio" type="number" min="0" step="100" value="${p.precio}" required></div>
+        <button style="align-self:end">Guardar</button>
+      </form>
+      ${p.grupos.map((g) => `
+        <fieldset class="grupo-op">
+          <legend>${esc(g.nombre)} disponible hoy</legend>
+          <div class="opciones-dia">${g.opciones.map((o) => `
+            <label class="check"><input type="checkbox" data-opcion="${o.id}" ${o.activo ? 'checked' : ''}> ${esc(o.nombre)}</label>`).join('')}</div>
+          ${g.opciones.some((o) => o.activo) ? '' : `<p class="negativo chico">Marque al menos una opción o no se podrá vender el ${esc(p.nombre)}.</p>`}
+          <form class="fila" data-submit="nuevaOpcion" data-grupo="${g.id}" style="margin-top:.6rem">
+            <input name="nombre" placeholder="Nueva, ej: Albóndigas" style="flex:2 1 180px">
+            <select name="insumo_id" style="flex:1 1 170px"><option value="">Sin descontar inventario</option>${opcionesInsumo}</select>
+            <input name="cantidad" type="number" min="0" step="any" placeholder="Cantidad" style="flex:0 1 110px">
+            <button class="primario">+ Agregar</button>
+          </form>
+        </fieldset>`).join('')}
+    </div>`;
   el.innerHTML = `
     <div class="titulo-vista"><h2>Menú, precios y recetas</h2></div>
+    ${delDia.map(tarjetaDia).join('')}
     <div class="tarjeta">
       <p class="suave chico">Listado del menú actual. Aquí se administran categorías, productos y costos.</p>
       ${menu.map((c) => `<div class="seccion">
@@ -1235,7 +1267,32 @@ async function vistaMenu(el) {
       </table></div>
       </div>`).join('') || '<p class="suave">Sin categorías.</p>'}
     </div>`;
-  S.acc = {};
+  S.acc = {
+    guardarDia: async (f) => {
+      await api(`/productos/${f.dataset.id}`, { method: 'PATCH', body: { descripcion: f.descripcion.value.trim(), precio: Number(f.precio.value) } });
+      toast('Menú del día guardado', 'ok');
+      vistaMenu(el);
+    },
+    nuevaOpcion: async (f) => {
+      const nombre = f.nombre.value.trim();
+      const insumo = Number(f.insumo_id.value);
+      const cantidad = Number(f.cantidad.value);
+      if (!nombre) throw new Error('Escriba el nombre de la opción');
+      if (insumo && !(cantidad > 0)) throw new Error('Indique cuánto descuenta del inventario');
+      const o = await api(`/grupos/${f.dataset.grupo}/opciones`, { method: 'POST', body: { nombre } });
+      if (insumo) await api('/recetas', { method: 'PUT', body: { opcion_id: o.id, lineas: [{ insumo_id: insumo, cantidad }] } });
+      toast(`${nombre} agregada`, 'ok');
+      vistaMenu(el);
+    },
+    _change: (e) => {
+      const id = e.target.dataset.opcion;
+      if (!id) return;
+      ejecutar(async () => {
+        await api(`/opciones/${id}`, { method: 'PATCH', body: { activo: e.target.checked } });
+        vistaMenu(el);
+      });
+    }
+  };
 }
 
 // ═══ VISTA: Reportes ═════════════════════════════════════════════════════════
