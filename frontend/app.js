@@ -40,6 +40,53 @@ const almacen = {
   borrar(k) { try { localStorage.removeItem(k); } catch { /* nada */ } }
 };
 
+// ─── Apariencia (tema por restaurante) ──────────────────────────────────────
+// Se guarda en los ajustes del restaurante (tema_*) y se recuerda en el equipo
+// para pintar el login con los colores del último restaurante usado.
+const TEMAS = {
+  hogar:    { nombre: 'Hogar',     primario: '#ff5a36', acento: '#ffbe3d', barra: '#1e1716', barra2: '#43312e', icono: '' },
+  brasa:    { nombre: 'Brasa',     primario: '#c62828', acento: '#ff9800', barra: '#120d0b', barra2: '#3b2418', icono: '🔥' },
+  campo:    { nombre: 'Campestre', primario: '#2e7d32', acento: '#c9a227', barra: '#16231a', barra2: '#33503a', icono: '🌿' },
+  mar:      { nombre: 'Mar',       primario: '#0277bd', acento: '#26c6da', barra: '#0b1726', barra2: '#1b3a5c', icono: '🐟' },
+  elegante: { nombre: 'Elegante',  primario: '#8e2442', acento: '#d4af37', barra: '#121212', barra2: '#2d2a26', icono: '' },
+  cafe:     { nombre: 'Café',      primario: '#8d5524', acento: '#e0a458', barra: '#1c130d', barra2: '#4a3324', icono: '☕' }
+};
+const temaDe = (aj = {}) => ({
+  primario: aj.tema_primario || TEMAS.hogar.primario,
+  acento: aj.tema_acento || TEMAS.hogar.acento,
+  barra: aj.tema_barra || TEMAS.hogar.barra,
+  barra2: aj.tema_barra2 || TEMAS.hogar.barra2,
+  icono: aj.tema_icono ?? ''
+});
+function aplicarTema(t) {
+  const r = document.documentElement.style;
+  const mezcla = (a, b, pct) => `color-mix(in srgb, ${a} ${pct}%, ${b})`;
+  r.setProperty('--rojo', t.primario);
+  r.setProperty('--rojo-osc', mezcla(t.primario, 'black', 85));
+  r.setProperty('--rojo-suave', mezcla(t.primario, 'white', 25));
+  r.setProperty('--naranja', mezcla(t.primario, t.acento, 50));
+  r.setProperty('--naranja-claro', mezcla(t.primario, 'white', 12));
+  r.setProperty('--amarillo', t.acento);
+  r.setProperty('--amarillo-claro', mezcla(t.acento, 'white', 30));
+  r.setProperty('--cafe', t.barra);
+  r.setProperty('--cafe-medio', t.barra2);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t.barra);
+}
+aplicarTema(almacen.leer('pos_tema') || temaDe());
+
+// ─── Menú lateral ───────────────────────────────────────────────────────────
+const cerrarLateral = () => document.body.classList.remove('lateral-abierto');
+if (almacen.leer('pos_lateral_mini')) document.body.classList.add('lateral-mini');
+$('#abrir-menu').addEventListener('click', () => document.body.classList.add('lateral-abierto'));
+$('#lateral-fondo').addEventListener('click', cerrarLateral);
+$('#nav').addEventListener('click', (e) => { if (e.target.closest('a')) cerrarLateral(); });
+$('#plegar').addEventListener('click', () => {
+  const mini = document.body.classList.toggle('lateral-mini');
+  $('#plegar').textContent = mini ? '»' : '«';
+  almacen.guardar('pos_lateral_mini', mini);
+});
+if (document.body.classList.contains('lateral-mini')) $('#plegar').textContent = '»';
+
 // Estado global
 const usuarioGuardado = almacen.leer('pos_usuario');
 const S = {
@@ -221,6 +268,8 @@ const NAV = [
   ['ajustes', 'Ajustes', []],
   ['restaurantes', 'Restaurantes', 'superadmin']
 ];
+const ICONO_NAV = { pedidos: '🧾', cocina: '🍳', domicilios: '🛵', caja: '💵', inventario: '📦', gastos: '💸',
+  menu: '📋', reportes: '📊', ajustes: '⚙️', restaurantes: '🏪' };
 // Vistas por rol; "superadmin" es solo para quien administra todos los restaurantes
 const puedeVer = (roles) => (roles === 'superadmin' ? !!S.usuario?.superadmin : tiene(...roles));
 const PERMISO_VISTA = { pedido: ['cajero', 'mesero'] };
@@ -271,8 +320,10 @@ async function iniciar() {
   $('#u-nombre').textContent = S.usuario.nombre;
   $('#u-rol').textContent = ROL[S.usuario.rol] + (S.usuario.superadmin && S.usuario.restaurante ? ` · ${S.usuario.restaurante}` : '');
   $('#nav').innerHTML = NAV.filter(([, , r]) => puedeVer(r))
-    .map(([v, t]) => `<a href="#${v}" data-v="${v}">${t}</a>`).join('');
+    .map(([v, t]) => `<a href="#${v}" data-v="${v}" title="${t}"><span class="ico">${ICONO_NAV[v] || '•'}</span><span class="txt">${t}</span></a>`).join('');
   try { S.ajustes = await api('/ajustes'); } catch { /* sigue */ }
+  aplicarTema(temaDe(S.ajustes));
+  almacen.guardar('pos_tema', temaDe(S.ajustes));
   pintarMarca();
   abrirEventos();
   if (!location.hash) location.hash = inicioRol();
@@ -285,7 +336,10 @@ function pintarMarca() {
   if (!nombre) return;
   const partes = nombre.split(/\s+/);
   const ultima = partes.length > 1 ? partes.pop() : '';
-  $('.barra .logo').innerHTML = `${esc(partes.join(' '))}${ultima ? ` <small>${esc(ultima)}</small>` : ''}`;
+  const icono = temaDe(S.ajustes).icono;
+  $$('#app .logo').forEach((l) => {
+    l.innerHTML = `${icono ? `<span class="icono-marca">${esc(icono)}</span>` : ''}${esc(partes.join(' '))}${ultima ? ` <small>${esc(ultima)}</small>` : ''}`;
+  });
   document.title = `${nombre} · POS`;
 }
 
@@ -298,6 +352,7 @@ async function navegar() {
   if (!VISTAS[nombre] || !permitido || !puedeVer(permitido)) { location.hash = inicioRol(); return; }
   S.vista = { nombre, args };
   S.acc = {};
+  if (S.ajustes) aplicarTema(temaDe(S.ajustes));
   clearInterval(S.reloj);
   $$('#nav a').forEach((a) => a.classList.toggle('activo', a.dataset.v === (nombre === 'pedido' ? 'pedidos' : nombre)));
   const el = $('#vista');
@@ -1759,6 +1814,28 @@ async function vistaAjustes(el) {
       <form data-submit="mesa" class="fila seccion"><input name="nombre" placeholder="Ej: Mesa 9, Terraza 1" required style="max-width:240px"><button>+ Mesa</button></form>
     </div>
     <div class="tarjeta">
+      <h3>Apariencia</h3>
+      <p class="chico suave">Colores e ícono de este restaurante. Se ven en todos sus equipos.</p>
+      <div class="temas">${Object.entries(TEMAS).map(([k, t]) => `
+        <button type="button" class="tema-opcion" data-acc="elegirTema" data-tema="${k}" title="${t.nombre}">
+          <span class="tema-muestra" style="background:linear-gradient(135deg, ${t.barra} 0 50%, ${t.primario} 50% 75%, ${t.acento} 75%)"></span>
+          <span>${t.icono ? t.icono + ' ' : ''}${t.nombre}</span>
+        </button>`).join('')}</div>
+      <form data-submit="apariencia" id="form-tema">
+        <div class="campos">
+          <div><label>Color principal (botones)</label><input type="color" name="tema_primario" value="${temaDe(aj).primario}"></div>
+          <div><label>Color de acento (menú activo)</label><input type="color" name="tema_acento" value="${temaDe(aj).acento}"></div>
+          <div><label>Menú lateral (arriba)</label><input type="color" name="tema_barra" value="${temaDe(aj).barra}"></div>
+          <div><label>Menú lateral (abajo)</label><input type="color" name="tema_barra2" value="${temaDe(aj).barra2}"></div>
+          <div><label>Ícono junto al nombre</label><input name="tema_icono" value="${esc(temaDe(aj).icono)}" maxlength="4" placeholder="Ej: 🔥"></div>
+        </div>
+        <div class="fila" style="margin-top:.6rem">
+          <button class="primario">Guardar apariencia</button>
+          <button type="button" data-acc="deshacerTema">Deshacer cambios</button>
+        </div>
+      </form>
+    </div>
+    <div class="tarjeta">
       <h3>Datos del negocio (tickets)</h3>
       <form data-submit="negocio">
         <div class="campos">
@@ -1851,6 +1928,28 @@ async function vistaAjustes(el) {
     },
     mesa: async (f) => { await api('/mesas', { method: 'POST', body: { nombre: f.nombre.value } }); vistaAjustes(el); },
     quitarMesa: async (b) => { await api(`/mesas/${b.dataset.id}`, { method: 'DELETE' }); vistaAjustes(el); },
+    elegirTema: (b) => {
+      const t = TEMAS[b.dataset.tema];
+      const f = $('#form-tema');
+      f.tema_primario.value = t.primario; f.tema_acento.value = t.acento;
+      f.tema_barra.value = t.barra; f.tema_barra2.value = t.barra2; f.tema_icono.value = t.icono;
+      aplicarTema(t);
+    },
+    deshacerTema: () => vistaAjustes(el),
+    _input: (e) => {
+      const f = e.target.form;
+      if (f?.id !== 'form-tema') return;
+      aplicarTema({ primario: f.tema_primario.value, acento: f.tema_acento.value, barra: f.tema_barra.value, barra2: f.tema_barra2.value });
+    },
+    apariencia: async (f) => {
+      const body = Object.fromEntries(new FormData(f));
+      await api('/ajustes', { method: 'PUT', body });
+      S.ajustes = await api('/ajustes');
+      aplicarTema(temaDe(S.ajustes));
+      almacen.guardar('pos_tema', temaDe(S.ajustes));
+      pintarMarca();
+      toast('Apariencia guardada', 'ok');
+    },
     negocio: async (f) => {
       const body = Object.fromEntries(new FormData(f));
       await api('/ajustes', { method: 'PUT', body });

@@ -33,16 +33,28 @@
 
   <!-- Aplicación -->
   <div id="app" hidden>
-    <header class="barra">
-      <span class="logo">Con Sabor a <small>Hogar</small></span>
-      <nav id="nav"></nav>
-      <span class="conexion" id="conexion" title="Conexión en tiempo real"></span>
-      <div class="usuario">
-        <b id="u-nombre"></b>
-        <span id="u-rol"></span> · <button type="button" id="salir">Salir</button>
+    <aside class="lateral" id="lateral">
+      <div class="lateral-cab">
+        <span class="logo">Con Sabor a <small>Hogar</small></span>
+        <button type="button" class="plegar" id="plegar" title="Contraer o expandir el menú" aria-label="Contraer menú">«</button>
       </div>
-    </header>
-    <main id="vista"></main>
+      <nav id="nav"></nav>
+      <div class="lateral-pie">
+        <span class="conexion" id="conexion" title="Conexión en tiempo real"></span>
+        <div class="usuario">
+          <b id="u-nombre"></b>
+          <span id="u-rol"></span> · <button type="button" id="salir">Salir</button>
+        </div>
+      </div>
+    </aside>
+    <div class="lateral-fondo" id="lateral-fondo"></div>
+    <div class="contenido">
+      <header class="barra-sup">
+        <button type="button" class="hamburguesa" id="abrir-menu" aria-label="Abrir menú">☰</button>
+        <span class="logo">Con Sabor a <small>Hogar</small></span>
+      </header>
+      <main id="vista"></main>
+    </div>
   </div>
 
   <div id="toasts" aria-live="polite"></div>
