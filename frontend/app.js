@@ -196,48 +196,170 @@ function confirmar(mensaje, { boton = 'Confirmar', peligro = false, campo = null
   });
 }
 
-// ─── Impresión de tickets (impresora térmica de 80 mm) ───────────────────────
-function imprimir(html) {
-  const f = document.createElement('iframe');
-  f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
-  document.body.appendChild(f);
-  const d = f.contentDocument;
-  d.open();
-  d.write(`<!doctype html><html><head><meta charset="utf-8"><style>
-    @page { size: 80mm auto; margin: 3mm; }
-    body { font: 12px/1.35 "Courier New", monospace; width: 72mm; margin: 0; color: #000; }
-    h1 { font-size: 16px; text-align: center; margin: 0; }
-    .c { text-align: center; } .r { text-align: right; } hr { border: 0; border-top: 1px dashed #000; }
-    table { width: 100%; border-collapse: collapse; } td { vertical-align: top; padding: 1px 0; }
-    .g { font-size: 15px; font-weight: bold; } .o { padding-left: 10px; font-size: 11px; }
-  </style></head><body>${html}</body></html>`);
-  d.close();
-  setTimeout(() => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 2000); }, 150);
+// ─── Impresión de tickets (impresora térmica de 80 o 58 mm) ──────────────────
+// Los tamaños van en "em" para que en papel de 58 mm todo se reduzca en proporción.
+const cssTicket = (ancho) => `
+  @page { size: ${ancho}mm auto; margin: 2mm; }
+  * { box-sizing: border-box; }
+  html { background: #fff; }
+  body { font: ${ancho <= 58 ? 12 : 14}px/1.35 Arial, Helvetica, sans-serif; width: ${ancho - 6}mm; margin: 0 auto; padding: 2mm 0; color: #000;
+         -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  h1 { font-size: 1.5em; text-align: center; margin: 0 0 .15em; line-height: 1.1; }
+  p { margin: .2em 0; }
+  .c { text-align: center; } .r { text-align: right; white-space: nowrap; }
+  .g { font-size: 1.15em; font-weight: 800; } .o { padding-left: .9em; font-size: .9em; }
+  .chico { font-size: .86em; } .b { font-weight: 800; }
+  hr { border: 0; border-top: 1px dashed #000; margin: .45em 0; }
+  hr.doble { border-top: 3px double #000; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { vertical-align: top; padding: .12em 0; }
+  th { font-size: .82em; text-align: left; border-bottom: 1px solid #000; padding-bottom: .2em; }
+  .titulo { text-align: center; font-size: 1.2em; font-weight: 900; letter-spacing: .1em; margin: .3em 0; }
+  .sub { text-align: center; font-size: .82em; margin-top: -.2em; }
+  .invertido { background: #000; color: #fff; text-align: center; font-weight: 900; padding: .25em .3em; font-size: 1.6em; border-radius: 4px; margin: .25em 0; }
+  .datos td { font-size: .95em; } .datos td:first-child { width: 36%; font-weight: 700; }
+  .linea td { padding: .25em 0; border-bottom: 1px dotted #999; }
+  .linea .cant { width: 2.2em; font-weight: 800; }
+  .total td { font-size: 1.45em; font-weight: 900; padding-top: .2em; }
+  .item-cmd { border-bottom: 1px dashed #000; padding: .35em 0; }
+  .item-cmd .n { font-size: 1.4em; font-weight: 900; line-height: 1.15; }
+  .item-cmd .op { font-size: 1.08em; padding-left: 1em; }
+  .item-cmd .ya { font-size: .85em; font-style: italic; }
+  .nota-cmd { border: 2px solid #000; padding: .2em .4em; margin-top: .25em; font-size: 1.1em; font-weight: 800; }
+  .aviso { border: 1px solid #000; padding: .3em .4em; font-size: .82em; margin: .35em 0; }
+  .pie { text-align: center; font-size: .82em; margin-top: .5em; }
+  .cufe { font-size: .68em; word-break: break-all; }
+`;
+const paginaTicket = (html, ancho) => `<!doctype html><html><head><meta charset="utf-8"><style>${cssTicket(ancho)}</style></head><body>${html}</body></html>`;
+
+// Muestra la vista previa del ticket y permite imprimirlo
+function imprimir(html, titulo = 'Vista previa') {
+  const ancho = Number(S.ajustes?.ancho_ticket) || 80;
+  const { m } = abrirModal(`
+    ${cabeceraModal(titulo)}
+    <div class="ticket-previa"><iframe title="Ticket" style="width:calc(${ancho}mm + 4mm)"></iframe></div>
+    <div class="pie"><button type="button" data-acc="cerrar">Cerrar</button><button class="primario" data-acc="imprimirYa" autofocus>🖨️ Imprimir</button></div>`, {
+    imprimirYa: () => { const w = $('iframe', m).contentWindow; w.focus(); w.print(); }
+  });
+  const f = $('iframe', m);
+  f.onload = () => { f.style.height = `${f.contentDocument.documentElement.scrollHeight + 8}px`; };
+  f.srcdoc = paginaTicket(html, ancho);
 }
 
+// Encabezado con los datos del negocio (y los fiscales, si están configurados)
+function encabezadoNegocio() {
+  const a = S.ajustes || {};
+  const nombre = a.nombre_negocio || S.usuario?.restaurante || '';
+  const icono = temaDe(a).icono;
+  const lineas = [
+    a.fe_razon_social && a.fe_razon_social !== nombre ? esc(a.fe_razon_social) : '',
+    a.fe_nit ? `NIT ${esc(a.fe_nit)}${a.fe_dv ? `-${esc(a.fe_dv)}` : ''}` : '',
+    a.fe_regimen ? esc(a.fe_regimen) : '',
+    [a.direccion, a.ciudad].filter(Boolean).map(esc).join(' · '),
+    a.telefono ? `Tel. ${esc(a.telefono)}` : ''
+  ].filter(Boolean);
+  return `<h1>${icono ? `${esc(icono)} ` : ''}${esc(nombre)}</h1>${lineas.length ? `<p class="c chico">${lineas.join('<br>')}</p>` : ''}`;
+}
+
+const filaDato = (k, v) => (v ? `<tr><td>${k}</td><td>${v}</td></tr>` : '');
+
 function ticketPedido(p, tipo = 'cuenta') {
-  const a = S.ajustes;
+  const a = S.ajustes || {};
   const items = p.items.filter((i) => i.estado !== 'anulado');
-  const dest = p.tipo === 'MESA' ? p.mesa : p.tipo === 'DOMICILIO' ? 'DOMICILIO' : 'PARA LLEVAR';
+  const destino = p.tipo === 'MESA' ? p.mesa : TIPO[p.tipo];
+  const cliente = p.cliente || p.nombre_cliente;
+  const unidades = items.reduce((s, i) => s + i.cantidad, 0);
+  const impreso = `Impreso: ${fechaHora(new Date())} · ${esc(S.usuario?.nombre || '')}`;
+
   if (tipo === 'comanda') {
-    return `<h1>COMANDA #${p.numero}</h1><p class="c g">${esc(dest)}</p><p class="c">${fechaHora(new Date())}</p><hr>
-      ${items.map((i) => `<div class="g">${i.cantidad} × ${esc(i.nombre)}</div>
-        ${i.opciones.length ? `<div class="o">${esc(i.opciones.join(', '))}</div>` : ''}
-        ${i.nota ? `<div class="o">» ${esc(i.nota)}</div>` : ''}`).join('')}
-      ${p.nota ? `<hr><div>NOTA: ${esc(p.nota)}</div>` : ''}`;
+    const enviado = items.map((i) => i.enviado_en).filter(Boolean).sort()[0];
+    return `
+      <div class="titulo">COMANDA</div>
+      <div class="invertido">${esc(String(destino).toUpperCase())}</div>
+      ${p.tipo !== 'MESA' && cliente ? `<p class="c g">${esc(cliente)}</p>` : ''}
+      <table class="datos">
+        ${filaDato('Pedido', `<b>#${p.numero}</b>`)}
+        ${filaDato('Tomado', `${hora(p.creado_en)} · ${fechaHora(p.creado_en).split(',')[0]}`)}
+        ${filaDato('A cocina', enviado ? hora(enviado) : 'Sin enviar')}
+        ${filaDato('Mesero', esc(p.mesero || ''))}
+      </table>
+      <hr class="doble">
+      ${items.map((i) => `<div class="item-cmd">
+        <div class="n">${i.cantidad} × ${esc(i.nombre)}</div>
+        ${i.opciones.map((o) => `<div class="op">• ${esc(o)}</div>`).join('')}
+        ${i.nota ? `<div class="nota-cmd">⚠ ${esc(i.nota)}</div>` : ''}
+        ${i.estado === 'entregado' ? '<div class="ya">(ya entregado)</div>' : ''}
+      </div>`).join('')}
+      <p class="c g" style="margin-top:.4em">${unidades} producto${unidades === 1 ? '' : 's'}</p>
+      ${p.nota ? `<div class="nota-cmd">NOTA DEL PEDIDO: ${esc(p.nota)}</div>` : ''}
+      ${p.tipo === 'DOMICILIO' ? `<p class="chico"><b>Domicilio:</b> ${esc(p.direccion_entrega || '')} ${esc(p.barrio || '')}${p.telefono ? ` · Tel. ${esc(p.telefono)}` : ''}</p>` : ''}
+      <p class="pie">${impreso}</p>`;
   }
-  return `<h1>${esc(a.nombre_negocio || S.usuario?.restaurante || '')}</h1>
-    <p class="c">${esc(a.direccion || '')}<br>Tel. ${esc(a.telefono || '')}</p><hr>
-    <div>Pedido #${p.numero} · ${esc(dest)}</div><div>${fechaHora(p.cerrado_en || p.creado_en)}</div>
-    ${p.cliente ? `<div>Cliente: ${esc(p.cliente)} ${esc(p.telefono || '')}</div>` : ''}
-    ${p.direccion_entrega ? `<div>Dir: ${esc(p.direccion_entrega)} ${esc(p.barrio || '')}</div>` : ''}
-    <hr><table>
-    ${items.map((i) => `<tr><td>${i.cantidad} ${esc(i.nombre)}${i.opciones.length ? `<div class="o">${esc(i.opciones.join(', '))}</div>` : ''}</td>
-      <td class="r">${pesos(i.cantidad * i.precio_unit)}</td></tr>`).join('')}
-    ${p.costo_envio > 0 ? `<tr><td>Domicilio</td><td class="r">${pesos(p.costo_envio)}</td></tr>` : ''}
-    </table><hr><table><tr><td class="g">TOTAL</td><td class="r g">${pesos(p.total)}</td></tr>
-    ${p.pagos.map((pg) => `<tr><td>${MEDIO[pg.medio]}${pg.por_liquidar ? ' (contra entrega)' : ''}</td><td class="r">${pesos(pg.valor)}</td></tr>`).join('')}
-    </table><hr><p class="c">${esc(a.pie_ticket || '¡Gracias por su compra!')}</p>`;
+
+  const subtotal = items.reduce((s, i) => s + i.cantidad * i.precio_unit, 0);
+  const impuestos = {};
+  items.forEach((i) => {
+    if (!i.impuesto_tipo || i.impuesto_tipo === 'EXCLUIDO' || !Number(i.impuesto_tasa)) return;
+    const t = i.cantidad * i.precio_unit;
+    const k = `${i.impuesto_tipo === 'INC' ? 'Impuesto al consumo' : 'IVA'} ${Number(i.impuesto_tasa)}%`;
+    impuestos[k] = (impuestos[k] || 0) + (t - t / (1 + Number(i.impuesto_tasa) / 100));
+  });
+  const pagado = p.estado === 'pagado';
+  const pagos = p.pagos.reduce((s, x) => s + Number(x.valor), 0);
+  const propina = Number(a.propina_sugerida) || 0;
+  const doc = typeof documentoVigente === 'function' ? documentoVigente(p) : null;
+  const titulo = p.estado === 'anulado' ? 'PEDIDO ANULADO' : pagado ? 'RECIBO DE PAGO' : 'CUENTA';
+
+  return `
+    ${encabezadoNegocio()}
+    <hr>
+    <div class="titulo">${titulo}</div>
+    ${!pagado && p.estado !== 'anulado' ? '<div class="sub">Pre-cuenta · no es factura de venta</div>' : ''}
+    <table class="datos" style="margin-top:.3em">
+      ${filaDato('Pedido', `<b>#${p.numero}</b>`)}
+      ${filaDato(p.tipo === 'MESA' ? 'Mesa' : 'Tipo', `<b>${esc(destino)}</b>`)}
+      ${filaDato('Fecha', fechaHora(p.creado_en))}
+      ${pagado ? filaDato('Pagado', fechaHora(p.cerrado_en)) : ''}
+      ${filaDato('Atendió', esc(p.mesero || ''))}
+      ${filaDato('Cliente', esc(cliente || ''))}
+      ${filaDato('Teléfono', esc(p.telefono || ''))}
+      ${filaDato('Dirección', p.direccion_entrega ? `${esc(p.direccion_entrega)}${p.barrio ? `, ${esc(p.barrio)}` : ''}` : '')}
+      ${filaDato('Domiciliario', esc(p.domiciliario || ''))}
+    </table>
+    <hr>
+    <table>
+      <tr><th>Cant</th><th>Descripción</th><th class="r">Valor</th></tr>
+      ${items.map((i) => `<tr class="linea">
+        <td class="cant">${i.cantidad}</td>
+        <td>${esc(i.nombre)}
+          ${i.opciones.length ? `<div class="o">${esc(i.opciones.join(', '))}</div>` : ''}
+          ${i.nota ? `<div class="o">» ${esc(i.nota)}</div>` : ''}
+          ${i.cantidad > 1 ? `<div class="o">${i.cantidad} × ${pesos(i.precio_unit)}</div>` : ''}</td>
+        <td class="r">${pesos(i.cantidad * i.precio_unit)}</td></tr>`).join('')}
+    </table>
+    <hr>
+    <table>
+      <tr><td>Subtotal (${unidades} producto${unidades === 1 ? '' : 's'})</td><td class="r">${pesos(subtotal)}</td></tr>
+      ${p.costo_envio > 0 ? `<tr><td>Domicilio</td><td class="r">${pesos(p.costo_envio)}</td></tr>` : ''}
+    </table>
+    <hr class="doble">
+    <table class="total"><tr><td>TOTAL</td><td class="r">${pesos(p.total)}</td></tr></table>
+    ${Object.keys(impuestos).length ? `<table class="chico">${Object.entries(impuestos).map(([k, v]) =>
+      `<tr><td>${k} incluido</td><td class="r">${pesos(v)}</td></tr>`).join('')}</table>` : ''}
+    ${!pagado && propina > 0 ? `<hr><table>
+        <tr><td>Propina voluntaria sugerida (${propina}%)</td><td class="r">${pesos(Math.round(p.total * propina / 100))}</td></tr>
+        <tr><td class="b">Total con propina</td><td class="r b">${pesos(Math.round(p.total * (1 + propina / 100)))}</td></tr></table>
+      <div class="aviso">La propina es voluntaria: usted puede aceptarla, modificar su valor o rechazarla. Infórmelo a quien lo atiende.</div>` : ''}
+    ${p.pagos.length ? `<hr><table>
+      ${p.pagos.map((pg) => `<tr><td>${MEDIO[pg.medio]}${pg.por_liquidar ? ' (contra entrega)' : ''}</td><td class="r">${pesos(pg.valor)}</td></tr>`).join('')}
+      ${!pagado && pagos < p.total ? `<tr><td class="b">Pendiente</td><td class="r b">${pesos(p.total - pagos)}</td></tr>` : ''}
+    </table>` : ''}
+    ${doc ? `<hr><p class="chico"><b>${esc(TIPO_DOC[doc.tipo])} ${esc(numDoc(doc))}</b></p>
+      ${doc.cufe ? `<p class="cufe">${doc.tipo === 'FACTURA' ? 'CUFE' : 'CUDE'}: ${esc(doc.cufe)}</p>` : ''}` : ''}
+    ${p.nota ? `<hr><p class="chico"><b>Nota:</b> ${esc(p.nota)}</p>` : ''}
+    <hr>
+    <p class="c b">${esc(a.pie_ticket || '¡Gracias por su compra!')}</p>
+    <p class="pie">${impreso}</p>`;
 }
 
 // ─── Sonido corto para avisos en cocina ──────────────────────────────────────
@@ -608,7 +730,7 @@ async function vistaPedido(el, id, tipo, mesaId) {
       toast('Pedido anulado');
       location.hash = 'pedidos';
     },
-    imprimirCuenta: () => imprimir(ticketPedido(S.pedido, 'cuenta')),
+    imprimirCuenta: () => imprimir(ticketPedido(S.pedido, 'cuenta'), `Cuenta · pedido #${S.pedido.numero}`),
     imprimirDoc: (b) => imprimirDocumento(Number(b.dataset.id)),
     pedirFactura: () => modalFacturaPedido(S.pedido, pintarCuenta),
     emitirPos: async () => {
@@ -616,7 +738,7 @@ async function vistaPedido(el, id, tipo, mesaId) {
       toast(`POS electrónico ${numDoc(d)} en proceso`, 'ok');
       pintarCuenta();
     },
-    imprimirComanda: () => imprimir(ticketPedido(S.pedido, 'comanda')),
+    imprimirComanda: () => imprimir(ticketPedido(S.pedido, 'comanda'), `Comanda · pedido #${S.pedido.numero}`),
     despachar: async () => {
       const did = $('#sel-domi').value;
       if (!did) throw new Error('Elija el domiciliario');
@@ -935,11 +1057,10 @@ function modalCobro(p) {
       if (r.aviso_fe) toast(r.aviso_fe, 'error', 9000);
       S.pedido = r;
       const doc = documentoVigente(r);
-      if (await confirmar(doc ? `¿Imprimir ${TIPO_DOC[doc.tipo].toLowerCase()} ${numDoc(doc)}?` : '¿Imprimir el recibo?', { boton: 'Imprimir' })) {
-        if (doc) await imprimirDocumento(doc.id);
-        else imprimir(ticketPedido(r, 'cuenta'));
-      }
       location.hash = 'pedidos';
+      // Vista previa del recibo (o del documento electrónico) lista para imprimir
+      if (doc) await imprimirDocumento(doc.id);
+      else imprimir(ticketPedido(r, 'cuenta'), `Recibo · pedido #${r.numero}`);
     }
   });
   const fe = feActiva() ? controlFactura(modal.m) : null;
@@ -1895,6 +2016,13 @@ async function vistaAjustes(el) {
           <div><label>Costo de domicilio por defecto</label><input name="costo_envio" type="number" min="0" step="500" value="${esc(aj.costo_envio || 0)}"></div>
         </div>
         <div class="campo" style="margin-top:.6rem"><label>Mensaje al pie del ticket</label><input name="pie_ticket" value="${esc(aj.pie_ticket || '')}"></div>
+        <div class="campos" style="margin-top:.6rem">
+          <div><label>Ancho del papel de la impresora</label><select name="ancho_ticket">
+            <option value="80" ${aj.ancho_ticket !== '58' ? 'selected' : ''}>80 mm (estándar)</option>
+            <option value="58" ${aj.ancho_ticket === '58' ? 'selected' : ''}>58 mm (pequeña)</option></select></div>
+          <div><label>Propina sugerida en la cuenta (%)</label><input name="propina_sugerida" type="number" min="0" max="30" step="1" value="${esc(aj.propina_sugerida || 0)}"></div>
+        </div>
+        <p class="chico suave">Con propina en 0 no se muestra. Si la usa, la cuenta incluye el aviso de que es voluntaria.</p>
         <button class="primario">Guardar</button>
       </form>
     </div>`;
@@ -2513,7 +2641,7 @@ async function imprimirDocumento(id, espera = 8000) {
     d = await api(`/fe/documentos/${id}`);
   }
   if (d.estado === 'rechazado' || d.estado === 'error') toast(`${TIPO_DOC[d.tipo]} ${numDoc(d)}: ${d.mensaje || ESTADO_DOC[d.estado]}`, 'error', 7000);
-  imprimir(ticketDocumento(d));
+  imprimir(ticketDocumento(d), `${TIPO_DOC[d.tipo]} ${numDoc(d)}`);
 }
 
 // Documento vigente (POS o factura no anulados) de un pedido
@@ -2594,7 +2722,7 @@ function modalFacturaPedido(p, listo) {
       cerrar();
       toast(`Factura ${numDoc(doc)} en proceso`, 'ok');
       listo?.();
-      if (await confirmar('¿Imprimir la factura?', { boton: 'Imprimir' })) await imprimirDocumento(doc.id);
+      await imprimirDocumento(doc.id);
     }
   });
   const ctl = controlFactura(m);

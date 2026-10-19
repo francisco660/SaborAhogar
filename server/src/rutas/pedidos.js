@@ -21,6 +21,8 @@ const SQL_PEDIDOS = `
              'id', i.id, 'producto_id', i.producto_id, 'nombre', i.nombre, 'cantidad', i.cantidad,
              'precio_unit', i.precio_unit, 'nota', i.nota, 'estado', i.estado,
              'enviado_en', i.enviado_en, 'listo_en', i.listo_en,
+             'impuesto_tipo', (SELECT pr.impuesto_tipo FROM producto pr WHERE pr.id = i.producto_id),
+             'impuesto_tasa', (SELECT pr.impuesto_tasa FROM producto pr WHERE pr.id = i.producto_id),
              'opciones', (SELECT coalesce(jsonb_agg(o.nombre ORDER BY o.opcion_id), '[]')
                             FROM pedido_item_opcion o WHERE o.item_id = i.id)
            ) ORDER BY i.id) FROM pedido_item i WHERE i.pedido_id = p.id), '[]') AS items,

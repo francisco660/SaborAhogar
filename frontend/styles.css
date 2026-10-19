@@ -471,6 +471,10 @@ table.horarios .hoy { background: color-mix(in srgb, var(--amarillo) 10%, transp
 .ubic.fuera { background: rgba(229, 83, 61, 0.14); color: #c63b26; }
 .aviso-ubic { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-bottom: 1rem; border-left: 5px solid var(--amarillo); }
 
+/* ─── Vista previa de tickets ─── */
+.ticket-previa { background: #e9e4e0; border-radius: 14px; padding: 1rem .5rem; max-height: 70vh; overflow: auto; text-align: center; }
+.ticket-previa iframe { background: #fff; border: 0; max-width: 100%; min-height: 200px; box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+
 /* ─── Facturación electrónica ─── */
 .fe-resultados { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .4rem; }
 #datos-factura { margin-top: .4rem; }
