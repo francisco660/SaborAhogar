@@ -32,11 +32,12 @@ r.patch('/insumos/:id', permite(), ah(async (req, res) => {
 
 r.get('/movimientos', caja, ah(async (req, res) => {
   const { rows } = await pool.query(`
-    SELECT m.*, i.nombre AS insumo, i.unidad, u.nombre AS usuario, pi.pedido_id
+    SELECT m.*, i.nombre AS insumo, i.unidad, u.nombre AS usuario, pi.pedido_id, pe.numero AS pedido_numero
       FROM movimiento_inventario m
       JOIN insumo i ON i.id = m.insumo_id
       LEFT JOIN usuario u ON u.id = m.usuario_id
       LEFT JOIN pedido_item pi ON pi.id = m.pedido_item_id
+      LEFT JOIN pedido pe ON pe.id = pi.pedido_id
      WHERE ($1::int IS NULL OR m.insumo_id = $1)
      ORDER BY m.id DESC LIMIT 300`, [req.query.insumo_id || null]);
   res.json(rows);

@@ -5,9 +5,10 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pool } from './db.js';
-import authRouter, { requiereAuth } from './auth.js';
+import { pool, conRestaurante } from './db.js';
+import authRouter, { requiereAuth, soloSuperadmin } from './auth.js';
 import { suscribir } from './eventos.js';
+import superadmin from './rutas/superadmin.js';
 import menu from './rutas/menu.js';
 import pedidos from './rutas/pedidos.js';
 import caja from './rutas/caja.js';
@@ -35,7 +36,10 @@ app.get('/api/salud', async (_req, res) => {
 
 app.use('/api', authRouter);
 app.get('/api/eventos', requiereAuth, suscribir);
-app.use('/api', requiereAuth, menu, pedidos, caja, inventario, admin);
+// El superadministrador trabaja por fuera de un restaurante (ve todos)
+app.use('/api/superadmin', requiereAuth, soloSuperadmin, superadmin);
+// Todo lo demás corre dentro del restaurante del usuario (ver conRestaurante en db.js)
+app.use('/api', requiereAuth, conRestaurante, menu, pedidos, caja, inventario, admin);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 
 app.use(express.static(path.resolve(__dirname, '../../frontend')));

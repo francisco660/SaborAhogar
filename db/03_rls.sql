@@ -90,26 +90,26 @@ CREATE POLICY server_only_turno_caja ON pos.turno_caja FOR ALL
 ALTER TABLE pos.retiro_caja ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS server_only_retiro_caja ON pos.retiro_caja;
 CREATE POLICY server_only_retiro_caja ON pos.retiro_caja FOR ALL
-  USING ( pos._is_server() )
-  WITH CHECK ( pos._is_server() );
+  USING ( pos.pos_is_server() )
+  WITH CHECK ( pos.pos_is_server() );
 
 ALTER TABLE pos.cliente ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS server_only_cliente ON pos.cliente;
 CREATE POLICY server_only_cliente ON pos.cliente FOR ALL
-  USING ( pos._is_server() )
-  WITH CHECK ( pos._is_server() );
+  USING ( pos.pos_is_server() )
+  WITH CHECK ( pos.pos_is_server() );
 
 ALTER TABLE pos.proveedor ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS server_only_proveedor ON pos.proveedor;
 CREATE POLICY server_only_proveedor ON pos.proveedor FOR ALL
-  USING ( pos._is_server() )
-  WITH CHECK ( pos._is_server() );
+  USING ( pos.pos_is_server() )
+  WITH CHECK ( pos.pos_is_server() );
 
 ALTER TABLE pos.ajuste ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS server_only_ajuste ON pos.ajuste;
 CREATE POLICY server_only_ajuste ON pos.ajuste FOR ALL
-  USING ( pos._is_server() )
-  WITH CHECK ( pos._is_server() );
+  USING ( pos.pos_is_server() )
+  WITH CHECK ( pos.pos_is_server() );
 
 -- Puedes añadir más políticas finas según necesites
 

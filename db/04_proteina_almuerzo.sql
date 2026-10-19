@@ -3,7 +3,7 @@
 
 INSERT INTO pos.insumo (nombre, unidad, stock_minimo, costo_promedio)
 VALUES ('Pescado', 'g', 2000, 30)
-ON CONFLICT (nombre) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO pos.grupo_opcion (producto_id, nombre, orden)
 SELECT p.id, 'Proteína', 1 FROM pos.producto p

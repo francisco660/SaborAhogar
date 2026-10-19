@@ -173,15 +173,15 @@ function ticketPedido(p, tipo = 'cuenta') {
   const items = p.items.filter((i) => i.estado !== 'anulado');
   const dest = p.tipo === 'MESA' ? p.mesa : p.tipo === 'DOMICILIO' ? 'DOMICILIO' : 'PARA LLEVAR';
   if (tipo === 'comanda') {
-    return `<h1>COMANDA #${p.id}</h1><p class="c g">${esc(dest)}</p><p class="c">${fechaHora(new Date())}</p><hr>
+    return `<h1>COMANDA #${p.numero}</h1><p class="c g">${esc(dest)}</p><p class="c">${fechaHora(new Date())}</p><hr>
       ${items.map((i) => `<div class="g">${i.cantidad} × ${esc(i.nombre)}</div>
         ${i.opciones.length ? `<div class="o">${esc(i.opciones.join(', '))}</div>` : ''}
         ${i.nota ? `<div class="o">» ${esc(i.nota)}</div>` : ''}`).join('')}
       ${p.nota ? `<hr><div>NOTA: ${esc(p.nota)}</div>` : ''}`;
   }
-  return `<h1>${esc(a.nombre_negocio || 'Con Sabor a Hogar')}</h1>
+  return `<h1>${esc(a.nombre_negocio || S.usuario?.restaurante || '')}</h1>
     <p class="c">${esc(a.direccion || '')}<br>Tel. ${esc(a.telefono || '')}</p><hr>
-    <div>Pedido #${p.id} · ${esc(dest)}</div><div>${fechaHora(p.cerrado_en || p.creado_en)}</div>
+    <div>Pedido #${p.numero} · ${esc(dest)}</div><div>${fechaHora(p.cerrado_en || p.creado_en)}</div>
     ${p.cliente ? `<div>Cliente: ${esc(p.cliente)} ${esc(p.telefono || '')}</div>` : ''}
     ${p.direccion_entrega ? `<div>Dir: ${esc(p.direccion_entrega)} ${esc(p.barrio || '')}</div>` : ''}
     <hr><table>
@@ -218,8 +218,11 @@ const NAV = [
   ['gastos', 'Gastos', ['cajero']],
   ['menu', 'Menú', []],
   ['reportes', 'Reportes', []],
-  ['ajustes', 'Ajustes', []]
+  ['ajustes', 'Ajustes', []],
+  ['restaurantes', 'Restaurantes', 'superadmin']
 ];
+// Vistas por rol; "superadmin" es solo para quien administra todos los restaurantes
+const puedeVer = (roles) => (roles === 'superadmin' ? !!S.usuario?.superadmin : tiene(...roles));
 const PERMISO_VISTA = { pedido: ['cajero', 'mesero'] };
 
 function inicioRol() {
@@ -265,13 +268,24 @@ async function iniciar() {
   $('#login').hidden = true;
   $('#app').hidden = false;
   $('#u-nombre').textContent = S.usuario.nombre;
-  $('#u-rol').textContent = ROL[S.usuario.rol];
-  $('#nav').innerHTML = NAV.filter(([, , r]) => tiene(...r))
+  $('#u-rol').textContent = ROL[S.usuario.rol] + (S.usuario.superadmin && S.usuario.restaurante ? ` · ${S.usuario.restaurante}` : '');
+  $('#nav').innerHTML = NAV.filter(([, , r]) => puedeVer(r))
     .map(([v, t]) => `<a href="#${v}" data-v="${v}">${t}</a>`).join('');
   try { S.ajustes = await api('/ajustes'); } catch { /* sigue */ }
+  pintarMarca();
   abrirEventos();
   if (!location.hash) location.hash = inicioRol();
   else navegar();
+}
+
+// Nombre del restaurante en la barra: la última palabra va en cursiva
+function pintarMarca() {
+  const nombre = (S.ajustes?.nombre_negocio || S.usuario?.restaurante || '').trim();
+  if (!nombre) return;
+  const partes = nombre.split(/\s+/);
+  const ultima = partes.length > 1 ? partes.pop() : '';
+  $('.barra .logo').innerHTML = `${esc(partes.join(' '))}${ultima ? ` <small>${esc(ultima)}</small>` : ''}`;
+  document.title = `${nombre} · POS`;
 }
 
 window.addEventListener('hashchange', navegar);
@@ -280,7 +294,7 @@ async function navegar() {
   if (!S.usuario) return;
   const [nombre, ...args] = (location.hash.slice(1) || inicioRol()).split('/');
   const permitido = NAV.find(([v]) => v === nombre)?.[2] ?? PERMISO_VISTA[nombre];
-  if (!VISTAS[nombre] || !permitido || !tiene(...permitido)) { location.hash = inicioRol(); return; }
+  if (!VISTAS[nombre] || !permitido || !puedeVer(permitido)) { location.hash = inicioRol(); return; }
   S.vista = { nombre, args };
   S.acc = {};
   clearInterval(S.reloj);
@@ -370,7 +384,7 @@ function abrirEventos() {
             : 'Domicilio';
         const texto = pedido.tipo === 'MESA'
           ? `${destino}: pedido listo (${nuevos.length} item${nuevos.length > 1 ? 's' : ''})`
-          : `Pedido #${pedido.id}: ${destino} listo (${nuevos.length} item${nuevos.length > 1 ? 's' : ''})`;
+          : `Pedido #${pedido.numero}: ${destino} listo (${nuevos.length} item${nuevos.length > 1 ? 's' : ''})`;
         pitido();
         toast(texto, 'ok', 8000);
         if (S.vista?.nombre === 'pedido' && String(S.vista.args[0]) === String(pedido.id)) {
@@ -433,7 +447,7 @@ async function vistaPedidos(el) {
       <h3>Para llevar y domicilios</h3>
       ${otros.length ? `<div class="lista-pedidos">${otros.map((p) => `
         <button class="tarjeta pedido-card ${p.items.some((i) => i.estado === 'listo') ? 'alerta-pedido' : ''}" data-acc="ver" data-id="${p.id}">
-          <div class="entre"><b>#${p.id} · ${TIPO[p.tipo]}</b><b>${pesos(p.total)}</b></div>
+          <div class="entre"><b>#${p.numero} · ${TIPO[p.tipo]}</b><b>${pesos(p.total)}</b></div>
           <div class="suave chico">${esc(p.cliente || p.nombre_cliente || '')} ${p.barrio ? '· ' + esc(p.barrio) : ''} · ${hora(p.creado_en)}</div>
           <div style="margin-top:.4rem">${resumenCocina(p) || '<span class="suave chico">Sin ítems</span>'}</div>
         </button>`).join('')}</div>` : '<p class="vacio">No hay pedidos para llevar ni domicilios abiertos.</p>'}
@@ -448,7 +462,7 @@ async function vistaPedidos(el) {
       $('#hoy').innerHTML = `<div class="tarjeta tabla-cont"><table>
         <thead><tr><th>#</th><th>Hora</th><th>Tipo</th><th>Cliente / mesa</th><th>Estado</th><th class="num">Total</th></tr></thead>
         <tbody>${lista.map((p) => `<tr data-acc="ver" data-id="${p.id}" style="cursor:pointer">
-          <td>${p.id}</td><td>${hora(p.creado_en)}</td><td>${TIPO[p.tipo]}</td>
+          <td>${p.numero}</td><td>${hora(p.creado_en)}</td><td>${TIPO[p.tipo]}</td>
           <td>${esc(p.mesa || p.cliente || p.nombre_cliente || '')}</td>
           <td><span class="chip ${p.estado}">${p.estado}</span></td><td class="num">${pesos(p.total)}</td></tr>`).join('')}
         </tbody></table></div>`;
@@ -512,7 +526,7 @@ async function vistaPedido(el, id, tipo, mesaId) {
     },
     cobrar: () => modalCobro(S.pedido),
     anular: async () => {
-      const motivo = await confirmar(`¿Anular el pedido #${S.pedido.id}? Los ítems que no se han preparado vuelven al inventario.`,
+      const motivo = await confirmar(`¿Anular el pedido #${S.pedido.numero}? Los ítems que no se han preparado vuelven al inventario.`,
         { boton: 'Anular pedido', peligro: true, campo: 'Motivo' });
       if (!motivo) return;
       await api(`/pedidos/${S.pedido.id}/anular`, { method: 'POST', body: { motivo } });
@@ -610,7 +624,7 @@ function agregarProducto(p) {
 const domicilioEditable = (p) => p.tipo === 'DOMICILIO' && p.estado !== 'anulado' && !p.entregado_en;
 function modalDatosDomicilio(p, listo) {
   abrirModal(`
-    ${cabeceraModal(`Datos del domicilio #${p.id}`)}
+    ${cabeceraModal(`Datos del domicilio #${p.numero}`)}
     <form>
       <div class="campos">
         <div><label>Teléfono *</label><input name="telefono" inputmode="tel" value="${esc(p.telefono || '')}" required autofocus></div>
@@ -668,7 +682,7 @@ async function pintarCuenta() {
   let cabecera;
   if (p) {
     const destino = p.tipo === 'MESA' ? esc(p.mesa) : p.tipo === 'DOMICILIO' ? 'Domicilio' : 'Para llevar';
-    cabecera = `<h3><span>#${p.id} · ${destino}</span><span class="chip ${p.estado}">${p.estado}</h3>
+    cabecera = `<h3><span>#${p.numero} · ${destino}</span><span class="chip ${p.estado}">${p.estado}</h3>
       <div class="suave chico">${hora(p.creado_en)} · ${esc(p.mesero || '')}
         ${p.cliente || p.nombre_cliente ? ` · ${esc(p.cliente || p.nombre_cliente)}` : ''}
         ${p.telefono ? ` · ${esc(p.telefono)}` : ''}</div>
@@ -780,14 +794,14 @@ async function enviarPedido() {
   });
   S.carrito = [];
   S.carritoClave = String(p.id);
-  toast(`Pedido #${p.id} enviado a cocina`, 'ok');
+  toast(`Pedido #${p.numero} enviado a cocina`, 'ok');
   location.hash = `pedido/${p.id}`;
 }
 
 function modalCobro(p) {
   const puedeLiquidar = p.tipo === 'DOMICILIO' && p.domiciliario_id;
   const modal = abrirModal(`
-    ${cabeceraModal(`Cobrar pedido #${p.id}`)}
+    ${cabeceraModal(`Cobrar pedido #${p.numero}`)}
     <form>
       <div class="total" style="border-top:0;margin-top:0"><span>Total</span><span>${pesos(p.total)}</span></div>
       ${puedeLiquidar ? `<label class="check" style="margin-bottom:.6rem"><input type="checkbox" name="liquidar">
@@ -816,7 +830,7 @@ function modalCobro(p) {
       else body = { pagos: MEDIOS.map((x) => ({ medio: x, valor: Number(f[x].value) || 0 })).filter((x) => x.valor > 0) };
       const r = await api(`/pedidos/${p.id}/cobrar`, { method: 'POST', body });
       cerrar();
-      toast(`Pedido #${p.id} cobrado`, 'ok');
+      toast(`Pedido #${p.numero} cobrado`, 'ok');
       S.pedido = r;
       if (await confirmar('¿Imprimir el recibo?', { boton: 'Imprimir' })) imprimir(ticketPedido(r, 'cuenta'));
       location.hash = 'pedidos';
@@ -853,7 +867,7 @@ async function vistaCocina(el) {
       const min = minutos(c.desde);
       const destino = c.tipo === 'MESA' ? esc(c.mesa) : c.tipo === 'DOMICILIO' ? '🛵 Domicilio' : '🥡 Para llevar';
       return `<article class="comanda ${min >= 25 ? 'muy-tarde' : min >= 15 ? 'tarde' : ''}">
-        <header><b>${destino} · #${c.id}</b><span>${min} min</span></header>
+        <header><b>${destino} · #${c.numero}</b><span>${min} min</span></header>
         <div class="cuerpo">
           ${c.cliente ? `<div class="suave chico" style="padding-top:.3rem">${esc(c.cliente)}</div>` : ''}
           ${c.items.map((i) => `<div class="it ${i.estado}">
@@ -898,9 +912,9 @@ async function vistaDomicilios(el) {
     : '<span class="chip abierto">Sin cobrar</span>';
   const tarjeta = (p) => `
     <div class="tarjeta">
-      <div class="entre"><b>#${p.id} · ${esc(p.cliente || '')}</b><b>${pesos(p.total)}</b></div>
+      <div class="entre"><b>#${p.numero} · ${esc(p.cliente || '')}</b><b>${pesos(p.total)}</b></div>
       <div>📍 ${esc(p.direccion_entrega || '')} ${p.barrio ? '· ' + esc(p.barrio) : ''}
-        <a class="chico" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((p.direccion_entrega || '') + ', Bello, Antioquia')}">mapa</a></div>
+        <a class="chico" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([p.direccion_entrega, p.barrio, S.ajustes?.ciudad].filter(Boolean).join(', '))}">mapa</a></div>
       <div>📞 <a href="tel:${esc(p.telefono)}">${esc(p.telefono || '')}</a></div>
       <div class="chico suave">${p.items.filter((i) => i.estado !== 'anulado').map((i) => `${i.cantidad} ${esc(i.nombre)}`).join(', ')}</div>
       <div class="fila" style="margin-top:.4rem">${cocina(p)} ${pago(p)}
@@ -921,7 +935,7 @@ async function vistaDomicilios(el) {
     ${pend.length ? `<div class="lista-pedidos">${pend.map(tarjeta).join('')}</div>` : '<p class="vacio">No hay domicilios pendientes.</p>'}
     ${entregados.length ? `<div class="seccion"><h3>Entregados (${entregados.length})</h3><div class="tarjeta tabla-cont"><table>
       <thead><tr><th>#</th><th>Cliente</th><th>Domiciliario</th><th>Entregado</th><th class="num">Total</th></tr></thead>
-      <tbody>${entregados.map((p) => `<tr><td>${p.id}</td><td>${esc(p.cliente || '')}</td><td>${esc(p.domiciliario || '')}</td>
+      <tbody>${entregados.map((p) => `<tr><td>${p.numero}</td><td>${esc(p.cliente || '')}</td><td>${esc(p.domiciliario || '')}</td>
         <td>${hora(p.entregado_en)}</td><td class="num">${pesos(p.total)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}`;
 
   S.acc = {
@@ -996,7 +1010,7 @@ async function vistaCaja(el) {
           <div class="tarjeta">
             <h3>Efectivo de domiciliarios por recibir</h3>
             ${porLiquidar.length ? `${porLiquidar.map((x) => `<label class="check"><input type="checkbox" name="liq" value="${x.id}" checked>
-              #${x.pedido_id} · ${esc(x.domiciliario)} · ${esc(x.cliente || '')} — <b>${pesos(x.valor)}</b>
+              #${x.pedido_numero} · ${esc(x.domiciliario)} · ${esc(x.cliente || '')} — <b>${pesos(x.valor)}</b>
               ${x.entregado_en ? '' : '<span class="chip en_cocina">en camino</span>'}</label>`).join('')}
               <button class="aviso" style="margin-top:.5rem" data-acc="liquidar">Recibir efectivo seleccionado</button>`
               : '<p class="suave chico">Nada pendiente.</p>'}
@@ -1093,7 +1107,7 @@ async function vistaInventario(el) {
       <thead><tr><th>Fecha</th><th>Insumo</th><th>Tipo</th><th class="num">Cantidad</th><th>Detalle</th></tr></thead>
       <tbody>${movs.map((m) => `<tr><td>${fechaHora(m.creado_en)}</td><td>${esc(m.insumo)}</td><td>${TIPO_MOV[m.tipo]}</td>
         <td class="num ${m.cantidad < 0 ? 'negativo' : 'positivo'}">${m.cantidad > 0 ? '+' : ''}${num(m.cantidad)} ${m.unidad}</td>
-        <td class="chico suave">${m.pedido_id ? `Pedido #${m.pedido_id}` : ''} ${esc(m.nota || '')} ${esc(m.usuario || '')}</td></tr>`).join('')}</tbody></table></div>`;
+        <td class="chico suave">${m.pedido_id ? `Pedido #${m.pedido_numero}` : ''} ${esc(m.nota || '')} ${esc(m.usuario || '')}</td></tr>`).join('')}</tbody></table></div>`;
   }
   el.innerHTML = `
     <div class="titulo-vista"><h2>Inventario</h2>
@@ -1493,6 +1507,7 @@ async function vistaAjustes(el) {
           <div><label>Nombre</label><input name="nombre_negocio" value="${esc(aj.nombre_negocio || '')}"></div>
           <div><label>Teléfono</label><input name="telefono" value="${esc(aj.telefono || '')}"></div>
           <div><label>Dirección</label><input name="direccion" value="${esc(aj.direccion || '')}"></div>
+          <div><label>Ciudad (para el mapa de domicilios)</label><input name="ciudad" value="${esc(aj.ciudad || '')}" placeholder="Ej: Bello, Antioquia"></div>
           <div><label>Costo de domicilio por defecto</label><input name="costo_envio" type="number" min="0" step="500" value="${esc(aj.costo_envio || 0)}"></div>
         </div>
         <div class="campo" style="margin-top:.6rem"><label>Mensaje al pie del ticket</label><input name="pie_ticket" value="${esc(aj.pie_ticket || '')}"></div>
@@ -1582,14 +1597,89 @@ async function vistaAjustes(el) {
       const body = Object.fromEntries(new FormData(f));
       await api('/ajustes', { method: 'PUT', body });
       S.ajustes = await api('/ajustes');
+      pintarMarca();
       toast('Datos guardados', 'ok');
+    }
+  };
+}
+
+// ═══ VISTA: Restaurantes (solo superadministrador) ═══════════════════════════
+async function vistaRestaurantes(el) {
+  const lista = await api('/superadmin/restaurantes');
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Restaurantes</h2>
+      <span class="suave">Ahora estás en: <b>${esc(S.usuario.restaurante || '')}</b></span></div>
+    <div class="tarjeta tabla-cont"><table>
+      <thead><tr><th>#</th><th>Restaurante</th><th>Ciudad</th><th class="num">Usuarios</th><th class="num">Pedidos</th><th>Último pedido</th><th>Estado</th><th></th></tr></thead>
+      <tbody>${lista.map((r) => `<tr class="${r.activo ? '' : 'suave'}">
+        <td>${r.id}</td>
+        <td><strong>${esc(r.nombre)}</strong> ${r.id === S.usuario.restaurante_id ? '<span class="chip abierto">aquí estás</span>' : ''}</td>
+        <td>${esc(r.ciudad || '—')}</td>
+        <td class="num">${r.usuarios}</td><td class="num">${r.pedidos}</td>
+        <td>${r.ultimo_pedido ? fechaHora(r.ultimo_pedido) : '—'}</td>
+        <td>${r.activo ? '<span class="state ok">Activo</span>' : '<span class="state off">Inactivo</span>'}</td>
+        <td class="derecha">${menuAcciones([
+          { acc: 'entrar', id: r.id, texto: '🚪 Entrar a administrarlo' },
+          { acc: 'activar', id: r.id, texto: r.activo ? '⏸️ Desactivar' : '▶️ Activar', peligro: r.activo, extra: `data-activo="${r.activo}"` }
+        ], r.nombre)}</td></tr>`).join('')}</tbody></table></div>
+
+    <form class="tarjeta" data-submit="crear">
+      <h3>Nuevo restaurante</h3>
+      <div class="campos">
+        <div><label>Nombre *</label><input name="nombre" required></div>
+        <div><label>Ciudad</label><input name="ciudad" placeholder="Ej: Medellín, Antioquia"></div>
+        <div><label>Dirección</label><input name="direccion"></div>
+        <div><label>Teléfono</label><input name="telefono"></div>
+        <div><label>Número de mesas</label><input name="mesas" type="number" min="0" max="50" value="6"></div>
+        <div><label>Copiar el menú de</label><select name="copiar_menu_de">
+          ${lista.map((r) => `<option value="${r.id}">${esc(r.nombre)}</option>`).join('')}
+          <option value="">— Empezar sin menú —</option></select></div>
+      </div>
+      <div class="etiqueta-seccion">Administrador del restaurante</div>
+      <div class="campos">
+        <div><label>Nombre *</label><input name="admin_nombre" required></div>
+        <div><label>Correo *</label><input name="admin_email" type="email" required></div>
+        <div><label>Clave *</label><input name="admin_clave" type="password" minlength="6" required></div>
+      </div>
+      <p class="chico suave">Se copian los productos, opciones, recetas e insumos (con stock en 0). Las ventas, clientes y usuarios no se copian.</p>
+      <button class="primario">Crear restaurante</button>
+    </form>`;
+
+  S.acc = {
+    crear: async (f) => {
+      await api('/superadmin/restaurantes', { method: 'POST', body: {
+        nombre: f.nombre.value, ciudad: f.ciudad.value, direccion: f.direccion.value, telefono: f.telefono.value,
+        mesas: f.mesas.value, copiar_menu_de: f.copiar_menu_de.value || null,
+        admin: { nombre: f.admin_nombre.value, email: f.admin_email.value, clave: f.admin_clave.value } } });
+      toast(`Restaurante "${f.nombre.value}" creado`, 'ok');
+      vistaRestaurantes(el);
+    },
+    entrar: async (b) => {
+      const s = await api(`/superadmin/restaurantes/${b.dataset.id}/entrar`, { method: 'POST' });
+      // Sesión nueva dentro del otro restaurante: se olvida todo lo del anterior
+      S.usuario = s;
+      almacen.guardar('pos_usuario', s);
+      Object.assign(S, { menu: null, ajustes: null, pedido: null, carrito: [], carritoClave: null, mesas: null });
+      S.cocinaVistos.clear();
+      S.avisoListo.clear();
+      cerrarEventos();
+      history.replaceState(null, '', '#pedidos');
+      await iniciar();
+      toast(`Ahora estás en ${s.restaurante}`, 'ok');
+    },
+    activar: async (b) => {
+      const activo = b.dataset.activo === 'true';
+      if (activo && !(await confirmar('¿Desactivar este restaurante? Sus usuarios no podrán entrar hasta que lo active de nuevo.', { boton: 'Desactivar', peligro: true }))) return;
+      await api(`/superadmin/restaurantes/${b.dataset.id}`, { method: 'PATCH', body: { activo: !activo } });
+      vistaRestaurantes(el);
     }
   };
 }
 
 const VISTAS = {
   pedidos: vistaPedidos, pedido: vistaPedido, cocina: vistaCocina, domicilios: vistaDomicilios, caja: vistaCaja,
-  inventario: vistaInventario, gastos: vistaGastos, menu: vistaMenu, reportes: vistaReportes, ajustes: vistaAjustes
+  inventario: vistaInventario, gastos: vistaGastos, menu: vistaMenu, reportes: vistaReportes, ajustes: vistaAjustes,
+  restaurantes: vistaRestaurantes
 };
 
 iniciar();

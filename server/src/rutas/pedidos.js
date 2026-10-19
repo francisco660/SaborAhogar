@@ -103,7 +103,7 @@ r.get('/pedidos/:id', ah(async (req, res) => res.json(await obtenerPedido(pool, 
 // Pantalla de cocina: ítems en preparación agrupados por pedido
 r.get('/cocina', permite('cocina', 'cajero', 'mesero'), ah(async (_req, res) => {
   const { rows } = await pool.query(`
-    SELECT p.id, p.tipo, p.nota, m.nombre AS mesa, coalesce(cl.nombre, p.nombre_cliente) AS cliente,
+    SELECT p.id, p.numero, p.tipo, p.nota, m.nombre AS mesa, coalesce(cl.nombre, p.nombre_cliente) AS cliente,
            min(i.enviado_en) AS desde,
            jsonb_agg(jsonb_build_object('id', i.id, 'nombre', i.nombre, 'cantidad', i.cantidad,
              'nota', i.nota, 'estado', i.estado, 'enviado_en', i.enviado_en,
@@ -135,7 +135,7 @@ async function guardarCliente(c, cl = {}) {
   if (!tel || !cl.direccion?.trim()) throw new ErrorApp('El domicilio necesita teléfono y dirección');
   const { rows: [row] } = await c.query(
     `INSERT INTO cliente (telefono, nombre, direccion, barrio) VALUES ($1, $2, $3, $4)
-     ON CONFLICT (telefono) DO UPDATE SET
+     ON CONFLICT (restaurante_id, telefono) DO UPDATE SET
        nombre = coalesce(EXCLUDED.nombre, cliente.nombre),
        direccion = EXCLUDED.direccion, barrio = coalesce(EXCLUDED.barrio, cliente.barrio)
      RETURNING id`,
@@ -301,7 +301,7 @@ r.post('/pedidos/:id/cobrar', permite('cajero'), ah(async (req, res) => {
 // ─── Domicilios ─────────────────────────────────────────────────────────────
 r.get('/domiciliarios', ah(async (_req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, nombre FROM usuario WHERE rol = 'domiciliario' AND activo ORDER BY nombre`);
+    `SELECT id, nombre FROM usuario WHERE rol = 'domiciliario' AND activo AND restaurante_id = restaurante_actual() ORDER BY nombre`);
   res.json(rows);
 }));
 

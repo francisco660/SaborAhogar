@@ -47,7 +47,7 @@ r.post('/caja/retiro', ah(async (req, res) => {
 // Efectivo que tienen los domiciliarios y no han entregado
 r.get('/caja/por-liquidar', ah(async (_req, res) => {
   const { rows } = await pool.query(`
-    SELECT pg.id, pg.pedido_id, pg.valor, pg.creado_en, u.nombre AS domiciliario, pg.domiciliario_id,
+    SELECT pg.id, pg.pedido_id, p.numero AS pedido_numero, pg.valor, pg.creado_en, u.nombre AS domiciliario, pg.domiciliario_id,
            cl.nombre AS cliente, p.direccion_entrega, p.entregado_en
       FROM pago pg
       JOIN usuario u ON u.id = pg.domiciliario_id

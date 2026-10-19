@@ -63,17 +63,24 @@ r.get('/reportes/resumen', admin, ah(async (req, res) => {
 
 // ─── Usuarios ───────────────────────────────────────────────────────────────
 r.get('/usuarios', admin, ah(async (_req, res) => {
-  res.json((await pool.query(`SELECT id, email, nombre, rol, activo FROM usuario ORDER BY activo DESC, nombre`)).rows);
+  res.json((await pool.query(`SELECT id, email, nombre, rol, activo FROM usuario
+     WHERE restaurante_id = restaurante_actual() ORDER BY activo DESC, nombre`)).rows);
 }));
 
 r.post('/usuarios', admin, ah(async (req, res) => {
   const { email, nombre, clave, rol } = req.body;
   if (!email || !nombre || !ROLES.includes(rol)) throw new ErrorApp('Datos incompletos o rol inválido');
   if (!clave || clave.length < 6) throw new ErrorApp('La clave debe tener al menos 6 caracteres');
-  await pool.query(
-    `INSERT INTO usuario (email, nombre, password_hash, rol) VALUES ($1, $2, $3, $4)
-     ON CONFLICT (email) DO UPDATE SET nombre = $2, password_hash = $3, rol = $4, activo = true`,
-    [email.toLowerCase().trim(), nombre.trim(), await bcrypt.hash(clave, 10), rol]);
+  try {
+    await pool.query(
+      `INSERT INTO usuario (email, nombre, password_hash, rol) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (email) DO UPDATE SET nombre = $2, password_hash = $3, rol = $4, activo = true`,
+      [email.toLowerCase().trim(), nombre.trim(), await bcrypt.hash(clave, 10), rol]);
+  } catch (e) {
+    // El correo existe en otro restaurante: la seguridad por filas impide tocarlo
+    if (e.code === '42501') throw new ErrorApp('Ese correo ya está registrado en otro restaurante; use otro');
+    throw e;
+  }
   res.json({ ok: true });
 }));
 
@@ -154,7 +161,7 @@ r.post('/mesas', admin, ah(async (req, res) => {
   if (!nombre?.trim()) throw new ErrorApp('Escriba el nombre de la mesa');
   await pool.query(
     `INSERT INTO mesa (nombre, orden) VALUES ($1, (SELECT coalesce(max(orden),0) + 1 FROM mesa))
-     ON CONFLICT (nombre) DO UPDATE SET activa = true`, [nombre.trim()]);
+     ON CONFLICT (restaurante_id, nombre) DO UPDATE SET activa = true`, [nombre.trim()]);
   res.json({ ok: true });
 }));
 
@@ -172,7 +179,7 @@ r.get('/ajustes', ah(async (_req, res) => {
 r.put('/ajustes', admin, ah(async (req, res) => {
   for (const [clave, valor] of Object.entries(req.body || {})) {
     await pool.query(
-      `INSERT INTO ajuste (clave, valor) VALUES ($1, $2) ON CONFLICT (clave) DO UPDATE SET valor = $2`,
+      `INSERT INTO ajuste (clave, valor) VALUES ($1, $2) ON CONFLICT (restaurante_id, clave) DO UPDATE SET valor = $2`,
       [clave, String(valor)]);
   }
   res.json({ ok: true });
@@ -190,7 +197,7 @@ r.post('/empleados', admin, ah(async (req, res) => {
   if (!(valor >= 0)) throw new ErrorApp('El salario debe ser mayor o igual a cero');
   await pool.query(
     `INSERT INTO empleado (nombre, cargo, salario) VALUES ($1, $2, $3)
-     ON CONFLICT (nombre) DO UPDATE SET cargo = EXCLUDED.cargo, salario = EXCLUDED.salario, activo = true`,
+     ON CONFLICT (restaurante_id, nombre) DO UPDATE SET cargo = EXCLUDED.cargo, salario = EXCLUDED.salario, activo = true`,
     [nombre.trim(), cargo?.trim() || null, Math.round(valor)]);
   res.json({ ok: true });
 }));
