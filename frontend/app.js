@@ -250,6 +250,7 @@ $('#salir').addEventListener('click', () => salir());
 
 function salir() {
   S.usuario = null;
+  Object.assign(S, { menu: null, catActiva: null, ajustes: null, carrito: [], carritoClave: null });
   almacen.borrar('pos_usuario');
   cerrarEventos();
   $('#app').hidden = true;
@@ -486,7 +487,7 @@ async function vistaPedido(el, id, tipo, mesaId) {
       <section>
         <div class="entre" style="margin-bottom:.6rem">
           <a href="#pedidos">← Pedidos</a>
-          <input id="buscar" placeholder="Buscar plato…" style="max-width:260px" autocomplete="off">
+          <input id="buscar" type="search" name="buscar-plato" placeholder="Buscar plato…" style="max-width:260px" autocomplete="off" value="">
         </div>
         <div class="cats" id="cats"></div>
         <div class="prods" id="prods"></div>
@@ -559,6 +560,8 @@ async function vistaPedido(el, id, tipo, mesaId) {
 }
 
 function pintarProductos() {
+  // La categoría elegida puede no existir (menú cambiado u otro restaurante): usar la primera con productos
+  if (!S.menu.some((c) => c.id === S.catActiva)) S.catActiva = (S.menu.find((c) => c.productos.length) || S.menu[0])?.id;
   const q = $('#buscar')?.value.trim().toLowerCase();
   $('#cats').innerHTML = S.menu.map((c) =>
     `<button class="peq ${!q && c.id === S.catActiva ? 'activo' : ''}" data-acc="cat" data-id="${c.id}">${esc(c.nombre)}</button>`).join('');
@@ -570,7 +573,10 @@ function pintarProductos() {
       <span>${esc(p.nombre)}</span>
       ${p.grupos.length ? `<span class="op">Elegir: ${esc(p.grupos.map((g) => g.nombre).join(', '))}</span>` : ''}
       <span class="precio">${pesos(p.precio)}</span>
-    </button>`).join('') || '<p class="vacio">Sin resultados</p>';
+    </button>`).join('') || `<p class="vacio">${
+      !S.menu.some((c) => c.productos.length)
+        ? `Este restaurante todavía no tiene productos.${tiene() ? ' Créelos en la pestaña <a href="#menu">Menú</a>.' : ' Pida al administrador que cree el menú.'}`
+        : q ? `No hay productos que coincidan con "${esc(q)}".` : 'No hay productos en esta categoría.'}</p>`;
 }
 
 function agregarProducto(p) {
@@ -1298,6 +1304,7 @@ async function modalGasto(listo) {
 // ═══ VISTA: Menú (administración) ════════════════════════════════════════════
 async function vistaMenu(el) {
   const [menu, insumos] = await Promise.all([api('/menu?todo=1'), api('/insumos')]);
+  S.menuAdmin = { menu, insumos, recargar: () => vistaMenu(el) };
   // Productos del almuerzo que cambian cada día (proteínas, sopa, precio)
   const delDia = menu.find((c) => c.nombre === 'Almuerzo')?.productos.filter((p) => p.activo) || [];
   const opcionesInsumo = insumos.filter((i) => i.activo)
@@ -1325,27 +1332,77 @@ async function vistaMenu(el) {
           </form>
         </fieldset>`).join('')}
     </div>`;
+
+  const total = menu.reduce((n, c) => n + c.productos.length, 0);
+  const filaProducto = (p) => {
+    const pc = p.precio ? (p.costo_base / p.precio) * 100 : NaN;
+    const grupos = p.grupos.map((g) => `${esc(g.nombre)} (${g.opciones.filter((o) => o.activo).length})`).join(' · ');
+    return `<tr class="${p.activo ? '' : 'suave'}" data-buscar="${esc((p.nombre + ' ' + (p.descripcion || '')).toLowerCase())}">
+      <td><button type="button" class="enlace" data-acc="editarProducto" data-id="${p.id}"><strong>${esc(p.nombre)}</strong></button>
+        ${p.activo ? '' : '<span class="chip anulado">inactivo</span>'}
+        ${p.descripcion ? `<div class="chico suave">${esc(p.descripcion)}</div>` : ''}</td>
+      <td class="chico">${grupos || '<span class="suave">—</span>'}</td>
+      <td class="num">${pesos(p.precio)}</td>
+      <td class="num">${pesos(p.costo_base)}</td>
+      <td class="num ${pc > 40 ? 'negativo' : ''}">${pct(pc)}</td>
+      <td class="derecha">${menuAcciones([
+        { acc: 'editarProducto', id: p.id, texto: '✏️ Editar producto y opciones' },
+        { acc: 'recetaProducto', id: p.id, texto: '🧾 Receta (inventario)' },
+        { acc: 'activarProducto', id: p.id, texto: p.activo ? '⏸️ Desactivar (no se vende)' : '▶️ Activar', extra: `data-activo="${p.activo}"`, peligro: p.activo }
+      ], p.nombre)}</td>
+    </tr>`;
+  };
+
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Menú, precios y recetas</h2></div>
+    <div class="titulo-vista"><h2>Menú</h2>
+      <div class="fila">
+        <button data-acc="nuevaCategoria">+ Categoría</button>
+        <button class="primario" data-acc="nuevoProducto" ${menu.length ? '' : 'disabled title="Cree primero una categoría"'}>+ Producto</button>
+      </div>
+    </div>
     ${delDia.map(tarjetaDia).join('')}
     <div class="tarjeta">
-      <p class="suave chico">Listado del menú actual. Aquí se administran categorías, productos y costos.</p>
-      ${menu.map((c) => `<div class="seccion">
-        <h3>${esc(c.nombre)} ${c.activo ? '' : '<span class="chip anulado">oculta</span>'}</h3>
-        <div class="tabla-cont"><table><thead><tr><th>Producto</th><th class="num">Precio</th><th class="num">Costo</th><th class="num">% costo</th></tr></thead>
-        <tbody>${c.productos.map((p) => {
-          const pc = p.precio ? (p.costo_base / p.precio) * 100 : NaN;
-          return `<tr class="${p.activo ? '' : 'suave'}">
-            <td>${esc(p.nombre)} ${p.activo ? '' : '<span class="chip anulado">inactivo</span>'}</td>
-            <td class="num">${pesos(p.precio)}</td>
-            <td class="num">${pesos(p.costo_base)}</td>
-            <td class="num ${pc > 40 ? 'negativo' : ''}">${pct(pc)}</td>
-          </tr>`;
-        }).join('') || '<tr><td colspan="4" class="suave">Sin productos</td></tr>'}</tbody>
-      </table></div>
-      </div>`).join('') || '<p class="suave">Sin categorías.</p>'}
+      <div class="entre menu-cabecera">
+        <h3>Carta <span class="suave chico">${menu.length} categorías · ${total} productos</span></h3>
+        <input id="menu-buscar" type="search" placeholder="Buscar producto…" autocomplete="off" style="max-width:260px">
+      </div>
+      ${menu.length ? menu.map((c) => `
+        <section class="menu-cat" data-cat="${c.id}">
+          <div class="menu-cat-cab">
+            <h3>${esc(c.nombre)} <span class="suave chico">${c.productos.length}</span>
+              ${c.activo ? '' : '<span class="chip anulado">oculta en pedidos</span>'}</h3>
+            ${menuAcciones([
+              { acc: 'productoEnCategoria', id: c.id, texto: '➕ Agregar producto aquí' },
+              { acc: 'editarCategoria', id: c.id, texto: '✏️ Renombrar / ordenar' },
+              { acc: 'activarCategoria', id: c.id, texto: c.activo ? '🙈 Ocultar en pedidos' : '👁️ Mostrar en pedidos', extra: `data-activo="${c.activo}"` }
+            ], c.nombre)}
+          </div>
+          ${c.productos.length ? `<div class="tabla-cont"><table>
+            <thead><tr><th>Producto</th><th>Opciones para elegir</th><th class="num">Precio</th><th class="num">Costo</th><th class="num">% costo</th><th></th></tr></thead>
+            <tbody>${c.productos.map(filaProducto).join('')}</tbody></table></div>`
+          : `<p class="suave chico">Sin productos. <button type="button" class="enlace" data-acc="productoEnCategoria" data-id="${c.id}">Agregar el primero</button></p>`}
+        </section>`).join('')
+      : `<div class="vacio"><p>Este restaurante todavía no tiene menú.</p>
+          <button class="primario" data-acc="nuevaCategoria">+ Crear la primera categoría</button></div>`}
+      <p class="chico suave" style="margin-top:.8rem">El <b>costo</b> sale de la receta de cada producto y del costo promedio de sus insumos. En rojo, los que cuestan más del 40% de su precio.</p>
     </div>`;
+
+  const producto = (id) => menu.flatMap((c) => c.productos).find((p) => p.id === Number(id));
   S.acc = {
+    nuevaCategoria: () => modalCategoria(null),
+    editarCategoria: (b) => modalCategoria(menu.find((c) => c.id === Number(b.dataset.id))),
+    activarCategoria: async (b) => {
+      await api(`/categorias/${b.dataset.id}`, { method: 'PATCH', body: { activo: b.dataset.activo !== 'true' } });
+      vistaMenu(el);
+    },
+    nuevoProducto: () => modalProducto(null, menu[0]?.id),
+    productoEnCategoria: (b) => modalProducto(null, Number(b.dataset.id)),
+    editarProducto: (b) => modalProducto(producto(b.dataset.id)),
+    recetaProducto: (b) => { const p = producto(b.dataset.id); modalReceta({ producto_id: p.id }, `Receta: ${p.nombre}`, () => vistaMenu(el)); },
+    activarProducto: async (b) => {
+      await api(`/productos/${b.dataset.id}`, { method: 'PATCH', body: { activo: b.dataset.activo !== 'true' } });
+      vistaMenu(el);
+    },
     guardarDia: async (f) => {
       await api(`/productos/${f.dataset.id}`, { method: 'PATCH', body: { descripcion: f.descripcion.value.trim(), precio: Number(f.precio.value) } });
       toast('Menú del día guardado', 'ok');
@@ -1362,6 +1419,15 @@ async function vistaMenu(el) {
       toast(`${nombre} agregada`, 'ok');
       vistaMenu(el);
     },
+    _input: (e) => {
+      if (e.target.id !== 'menu-buscar') return;
+      const q = e.target.value.trim().toLowerCase();
+      $$('.menu-cat', el).forEach((sec) => {
+        const filas = $$('tr[data-buscar]', sec);
+        filas.forEach((tr) => { tr.hidden = !!q && !tr.dataset.buscar.includes(q); });
+        sec.hidden = !!q && !filas.some((tr) => !tr.hidden);
+      });
+    },
     _change: (e) => {
       const id = e.target.dataset.opcion;
       if (!id) return;
@@ -1371,6 +1437,198 @@ async function vistaMenu(el) {
       });
     }
   };
+}
+
+// ─── Editor de menú: categoría ───────────────────────────────────────────────
+function modalCategoria(c) {
+  abrirModal(`
+    ${cabeceraModal(c ? `Categoría: ${esc(c.nombre)}` : 'Nueva categoría')}
+    <form>
+      <div class="campos">
+        <div><label>Nombre *</label><input name="nombre" value="${esc(c?.nombre || '')}" placeholder="Ej: Almuerzos, Bebidas" required autofocus></div>
+        <div><label>Orden en el menú</label><input name="orden" type="number" min="0" value="${c?.orden ?? ''}" placeholder="Al final"></div>
+      </div>
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">${c ? 'Guardar' : 'Crear categoría'}</button></div>
+    </form>`, {
+    submit: async (f, _m, cerrar) => {
+      const body = { nombre: f.nombre.value, orden: f.orden.value };
+      await api(c ? `/categorias/${c.id}` : '/categorias', { method: c ? 'PATCH' : 'POST', body });
+      cerrar();
+      toast(c ? 'Categoría guardada' : 'Categoría creada', 'ok');
+      S.menuAdmin?.recargar();
+    }
+  });
+}
+
+// ─── Editor de menú: producto con sus grupos de opciones ─────────────────────
+function modalProducto(p, categoriaId) {
+  let prod = p;
+  let cambio = false;
+  const html = () => {
+    const cats = S.menuAdmin.menu;
+    const datos = `
+      <form data-form="datos">
+        <div class="campos">
+          <div style="grid-column: 1 / -1"><label>Nombre *</label><input name="nombre" value="${esc(prod?.nombre || '')}" required ${prod ? '' : 'autofocus'}></div>
+          <div><label>Categoría *</label><select name="categoria_id">${cats.map((c) =>
+            `<option value="${c.id}" ${c.id === (prod?.categoria_id ?? categoriaId) ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}</select></div>
+          <div><label>Precio *</label><input name="precio" type="number" min="0" step="100" value="${prod?.precio ?? ''}" required></div>
+          <div><label>Orden</label><input name="orden" type="number" min="0" value="${prod?.orden ?? ''}" placeholder="Al final"></div>
+          <div style="grid-column: 1 / -1"><label>Descripción (lo que incluye)</label>
+            <textarea name="descripcion" placeholder="Ej: Arroz, ensalada, papas y jugo natural">${esc(prod?.descripcion || '')}</textarea></div>
+          ${prod ? `<label class="check" style="grid-column: 1 / -1"><input type="checkbox" name="activo" ${prod.activo ? 'checked' : ''}> Activo (se puede vender)</label>` : ''}
+        </div>
+        <div class="pie"><button class="primario">${prod ? 'Guardar datos' : 'Crear producto'}</button></div>
+      </form>`;
+    if (!prod) return `${cabeceraModal('Nuevo producto')}${datos}
+      <p class="chico suave">Después de crearlo podrá agregarle opciones para elegir (proteína, bebida, término…) y su receta.</p>`;
+
+    const grupos = prod.grupos.map((g) => `
+      <div class="grupo-edit">
+        <form class="grupo-cab" data-form="grupo" data-id="${g.id}">
+          <input name="nombre" value="${esc(g.nombre)}" aria-label="Nombre del grupo" class="crece">
+          <label class="mini">Mín<input name="min_sel" type="number" min="0" value="${g.min_sel}"></label>
+          <label class="mini">Máx<input name="max_sel" type="number" min="1" value="${g.max_sel}"></label>
+          <button class="peq">Guardar</button>
+          <button type="button" class="peq peligro icono" data-acc="eliminarGrupo" data-id="${g.id}" title="Eliminar grupo" aria-label="Eliminar grupo">🗑️</button>
+        </form>
+        <div class="suave chico">${g.min_sel === 0 ? 'Opcional' : 'Obligatorio'} · ${g.max_sel === 1 ? 'se elige una' : `hasta ${g.max_sel}`}</div>
+        ${g.opciones.map((o) => `
+          <form class="opcion-fila ${o.activo ? '' : 'inactiva'}" data-form="opcion" data-id="${o.id}">
+            <input name="nombre" value="${esc(o.nombre)}" aria-label="Opción" class="crece">
+            <label class="mini">+ $<input name="precio_extra" type="number" min="0" step="100" value="${o.precio_extra}"></label>
+            <label class="check mini-check" title="Disponible"><input type="checkbox" name="activo" ${o.activo ? 'checked' : ''}> Disp.</label>
+            <button type="button" class="peq icono" data-acc="recetaOpcion" data-id="${o.id}" data-nombre="${esc(o.nombre)}" title="Receta de esta opción" aria-label="Receta">🧾</button>
+            <button class="peq">Guardar</button>
+          </form>`).join('')}
+        <form class="opcion-fila nueva" data-form="nuevaOpcion" data-id="${g.id}">
+          <input name="nombre" placeholder="Nueva opción, ej: Pechuga" class="crece">
+          <label class="mini">+ $<input name="precio_extra" type="number" min="0" step="100" value="0"></label>
+          <button class="peq primario">+ Agregar</button>
+        </form>
+      </div>`).join('');
+
+    return `${cabeceraModal(`Producto: ${esc(prod.nombre)}`)}
+      ${datos}
+      <div class="seccion-modal">
+        <div class="entre"><h4>Receta (descuenta del inventario)</h4>
+          <button type="button" class="peq" data-acc="recetaProducto">🧾 Editar receta</button></div>
+        <p class="chico suave">Costo actual de la receta: <b>${pesos(prod.costo_base)}</b>${prod.precio ? ` · ${pct((prod.costo_base / prod.precio) * 100)} del precio` : ''}</p>
+      </div>
+      <div class="seccion-modal">
+        <h4>Opciones para elegir</h4>
+        <p class="chico suave">Grupos que el mesero debe escoger al pedir (ej: <b>Proteína</b>, <b>Bebida</b>, <b>Término</b>). Mín 1 y Máx 1 = escoger una obligatoria. Mín 0 = opcional.</p>
+        ${grupos || '<p class="suave chico">Este producto no tiene opciones.</p>'}
+        <form class="fila nuevo-grupo" data-form="nuevoGrupo">
+          <input name="nombre" placeholder="Nuevo grupo, ej: Proteína" class="crece">
+          <label class="mini">Mín<input name="min_sel" type="number" min="0" value="1"></label>
+          <label class="mini">Máx<input name="max_sel" type="number" min="1" value="1"></label>
+          <button class="peq primario">+ Agregar grupo</button>
+        </form>
+      </div>
+      <div class="pie"><button type="button" data-acc="cerrar">Listo</button></div>`;
+  };
+
+  // Recarga el menú y vuelve a pintar la ventana con los datos frescos
+  const refrescar = async (m) => {
+    cambio = true;
+    S.menuAdmin.menu = await api('/menu?todo=1');
+    if (prod) prod = S.menuAdmin.menu.flatMap((c) => c.productos).find((x) => x.id === prod.id) || prod;
+    m.innerHTML = html();
+  };
+
+  abrirModal(html(), {
+    submit: async (f, m) => {
+      const v = (n) => f.elements[n]?.value;
+      switch (f.dataset.form) {
+        case 'datos': {
+          const body = { nombre: v('nombre'), categoria_id: Number(v('categoria_id')), precio: v('precio'),
+                         orden: v('orden'), descripcion: v('descripcion') };
+          if (prod) {
+            body.activo = f.elements.activo.checked;
+            await api(`/productos/${prod.id}`, { method: 'PATCH', body });
+            toast('Producto guardado', 'ok');
+          } else {
+            prod = await api('/productos', { method: 'POST', body });
+            toast('Producto creado. Ahora puede agregarle opciones y receta.', 'ok');
+          }
+          break;
+        }
+        case 'grupo':
+          await api(`/grupos/${f.dataset.id}`, { method: 'PATCH', body: { nombre: v('nombre'), min_sel: v('min_sel'), max_sel: v('max_sel') } });
+          toast('Grupo guardado', 'ok');
+          break;
+        case 'opcion':
+          await api(`/opciones/${f.dataset.id}`, { method: 'PATCH', body: { nombre: v('nombre'), precio_extra: v('precio_extra'), activo: f.elements.activo.checked } });
+          toast('Opción guardada', 'ok');
+          break;
+        case 'nuevaOpcion':
+          await api(`/grupos/${f.dataset.id}/opciones`, { method: 'POST', body: { nombre: v('nombre'), precio_extra: v('precio_extra') } });
+          break;
+        case 'nuevoGrupo':
+          await api(`/productos/${prod.id}/grupos`, { method: 'POST', body: { nombre: v('nombre'), min_sel: v('min_sel'), max_sel: v('max_sel') } });
+          break;
+      }
+      await refrescar(m);
+    },
+    eliminarGrupo: async (b, m) => {
+      if (!(await confirmar('¿Eliminar este grupo y sus opciones?', { boton: 'Eliminar', peligro: true }))) return;
+      await api(`/grupos/${b.dataset.id}`, { method: 'DELETE' });
+      await refrescar(m);
+    },
+    recetaProducto: (_b, m) => modalReceta({ producto_id: prod.id }, `Receta: ${prod.nombre}`, () => refrescar(m)),
+    recetaOpcion: (b, m) => modalReceta({ opcion_id: Number(b.dataset.id) }, `Receta de la opción: ${b.dataset.nombre}`, () => refrescar(m))
+  }, { ancho: true, alCerrar: () => { if (cambio) S.menuAdmin?.recargar(); } });
+}
+
+// ─── Editor de recetas (producto u opción) ───────────────────────────────────
+async function modalReceta(dueno, titulo, listo) {
+  const qs = dueno.producto_id ? `producto_id=${dueno.producto_id}` : `opcion_id=${dueno.opcion_id}`;
+  const insumos = (S.menuAdmin?.insumos || await api('/insumos')).filter((i) => i.activo);
+  let lineas = (await api(`/recetas?${qs}`)).map((l) => ({ insumo_id: l.insumo_id, cantidad: l.cantidad }));
+  const insumo = (id) => insumos.find((i) => i.id === Number(id));
+  const costo = () => lineas.reduce((t, l) => t + (Number(l.cantidad) || 0) * (insumo(l.insumo_id)?.costo_promedio || 0), 0);
+  const leer = (m) => {
+    lineas = $$('.receta-fila', m).map((r) => ({ insumo_id: Number(r.querySelector('select').value), cantidad: r.querySelector('input').value }));
+  };
+  const html = () => `
+    ${cabeceraModal(esc(titulo))}
+    <form>
+      <p class="chico suave">Lo que se descuenta del inventario cada vez que se vende${dueno.opcion_id ? ' esta opción (además de la receta del producto)' : ''}.</p>
+      <div class="receta-lista">${lineas.map((l) => `
+        <div class="receta-fila">
+          <select aria-label="Insumo">${insumos.map((i) => `<option value="${i.id}" ${i.id === Number(l.insumo_id) ? 'selected' : ''}>${esc(i.nombre)}</option>`).join('')}</select>
+          <input type="number" min="0" step="any" value="${esc(l.cantidad)}" aria-label="Cantidad" required>
+          <span class="unidad">${esc(insumo(l.insumo_id)?.unidad || '')}</span>
+          <button type="button" class="peq icono peligro" data-acc="quitar" aria-label="Quitar">✕</button>
+        </div>`).join('') || '<p class="suave chico">Sin insumos. Agregue el primero.</p>'}</div>
+      <button type="button" class="peq" data-acc="agregar" style="margin-top:.5rem" ${insumos.length ? '' : 'disabled'}>+ Agregar insumo</button>
+      ${insumos.length ? '' : '<p class="chico negativo">No hay insumos. Créelos primero en Inventario.</p>'}
+      <p class="entre" style="margin-top:.8rem"><span>Costo estimado</span><b>${pesos(costo())}</b></p>
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar receta</button></div>
+    </form>`;
+  abrirModal(html(), {
+    agregar: (_b, m) => { leer(m); lineas.push({ insumo_id: insumos[0].id, cantidad: '' }); m.innerHTML = html(); },
+    quitar: (b, m) => {
+      leer(m);
+      lineas.splice($$('.receta-fila', m).indexOf(b.closest('.receta-fila')), 1);
+      m.innerHTML = html();
+    },
+    change: (e, m) => { if (e.target.matches('.receta-fila select')) { leer(m); m.innerHTML = html(); } },
+    submit: async (f, m, cerrar) => {
+      leer(m);
+      const usados = new Set();
+      for (const l of lineas) {
+        if (!(Number(l.cantidad) > 0)) throw new Error(`Indique la cantidad de ${insumo(l.insumo_id)?.nombre}`);
+        if (usados.has(l.insumo_id)) throw new Error(`${insumo(l.insumo_id)?.nombre} está repetido`);
+        usados.add(l.insumo_id);
+      }
+      await api('/recetas', { method: 'PUT', body: { ...dueno, lineas: lineas.map((l) => ({ insumo_id: l.insumo_id, cantidad: Number(l.cantidad) })) } });
+      cerrar();
+      toast('Receta guardada', 'ok');
+      listo?.();
+    }
+  });
 }
 
 // ═══ VISTA: Reportes ═════════════════════════════════════════════════════════
@@ -1659,7 +1917,7 @@ async function vistaRestaurantes(el) {
       // Sesión nueva dentro del otro restaurante: se olvida todo lo del anterior
       S.usuario = s;
       almacen.guardar('pos_usuario', s);
-      Object.assign(S, { menu: null, ajustes: null, pedido: null, carrito: [], carritoClave: null, mesas: null });
+      Object.assign(S, { menu: null, catActiva: null, ajustes: null, pedido: null, carrito: [], carritoClave: null, mesas: null });
       S.cocinaVistos.clear();
       S.avisoListo.clear();
       cerrarEventos();

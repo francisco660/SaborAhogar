@@ -36,57 +36,101 @@ r.get('/menu', ah(async (req, res) => {
 // ─── Administración del menú (solo admin) ───────────────────────────────────
 const admin = permite();
 
+// Mensaje claro cuando un nombre ya existe (restricciones UNIQUE)
+const unico = (mensaje) => (e) => {
+  if (e.code === '23505') throw new ErrorApp(mensaje);
+  throw e;
+};
+const texto = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+const numero = (v) => (v === undefined || v === null || v === '' ? null : Number(v));
+
+// ─── Categorías ─────────────────────────────────────────────────────────────
 r.post('/categorias', admin, ah(async (req, res) => {
-  const { nombre, orden = 0 } = req.body;
+  const nombre = texto(req.body.nombre);
+  if (!nombre) throw new ErrorApp('Escriba el nombre de la categoría');
   const { rows } = await pool.query(
-    `INSERT INTO categoria (nombre, orden) VALUES ($1, $2) RETURNING *`, [nombre, orden]);
+    `INSERT INTO categoria (nombre, orden)
+     VALUES ($1, coalesce($2, (SELECT coalesce(max(orden), 0) + 1 FROM categoria))) RETURNING *`,
+    [nombre, numero(req.body.orden)]).catch(unico('Ya existe una categoría con ese nombre'));
+  avisar('menu');
   res.json(rows[0]);
 }));
 
 r.patch('/categorias/:id', admin, ah(async (req, res) => {
-  const { nombre, orden, activo } = req.body;
+  const { activo } = req.body;
   await pool.query(
     `UPDATE categoria SET nombre = coalesce($2, nombre), orden = coalesce($3, orden),
             activo = coalesce($4, activo) WHERE id = $1`,
-    [req.params.id, nombre, orden, activo]);
-  res.json({ ok: true });
-}));
-
-r.post('/productos', admin, ah(async (req, res) => {
-  const { categoria_id, nombre, precio, descripcion, orden = 0 } = req.body;
-  const { rows } = await pool.query(
-    `INSERT INTO producto (categoria_id, nombre, precio, descripcion, orden)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [categoria_id, nombre, precio, descripcion || null, orden]);
-  res.json(rows[0]);
-}));
-
-r.patch('/productos/:id', admin, ah(async (req, res) => {
-  const { categoria_id, nombre, precio, descripcion, activo, orden } = req.body;
-  await pool.query(
-    `UPDATE producto SET categoria_id = coalesce($2, categoria_id), nombre = coalesce($3, nombre),
-            precio = coalesce($4, precio), descripcion = coalesce($5, descripcion),
-            activo = coalesce($6, activo), orden = coalesce($7, orden)
-      WHERE id = $1`,
-    [req.params.id, categoria_id, nombre, precio, descripcion, activo, orden]);
+    [req.params.id, texto(req.body.nombre), numero(req.body.orden), typeof activo === 'boolean' ? activo : null])
+    .catch(unico('Ya existe una categoría con ese nombre'));
   avisar('menu');
   res.json({ ok: true });
 }));
 
-r.post('/productos/:id/grupos', admin, ah(async (req, res) => {
-  const { nombre, min_sel = 1, max_sel = 1 } = req.body;
+// ─── Productos ──────────────────────────────────────────────────────────────
+r.post('/productos', admin, ah(async (req, res) => {
+  const nombre = texto(req.body.nombre);
+  const precio = numero(req.body.precio);
+  if (!req.body.categoria_id) throw new ErrorApp('Elija la categoría');
+  if (!nombre) throw new ErrorApp('Escriba el nombre del producto');
+  if (!(precio >= 0)) throw new ErrorApp('Escriba un precio válido');
   const { rows } = await pool.query(
-    `INSERT INTO grupo_opcion (producto_id, nombre, min_sel, max_sel) VALUES ($1, $2, $3, $4) RETURNING *`,
-    [req.params.id, nombre, min_sel, max_sel]);
+    `INSERT INTO producto (categoria_id, nombre, precio, descripcion, orden)
+     VALUES ($1, $2, $3, $4, coalesce($5, (SELECT coalesce(max(orden), 0) + 1 FROM producto WHERE categoria_id = $1)))
+     RETURNING *`,
+    [req.body.categoria_id, nombre, Math.round(precio), texto(req.body.descripcion), numero(req.body.orden)])
+    .catch(unico('Ya existe un producto con ese nombre en esa categoría'));
+  avisar('menu');
+  res.json(rows[0]);
+}));
+
+r.patch('/productos/:id', admin, ah(async (req, res) => {
+  const { categoria_id, descripcion, activo } = req.body;
+  const precio = numero(req.body.precio);
+  if (precio !== null && !(precio >= 0)) throw new ErrorApp('Escriba un precio válido');
+  await pool.query(
+    `UPDATE producto SET categoria_id = coalesce($2, categoria_id), nombre = coalesce($3, nombre),
+            precio = coalesce($4, precio), descripcion = CASE WHEN $5::text IS NULL THEN descripcion ELSE nullif($5, '') END,
+            activo = coalesce($6, activo), orden = coalesce($7, orden)
+      WHERE id = $1`,
+    [req.params.id, categoria_id || null, texto(req.body.nombre), precio === null ? null : Math.round(precio),
+     typeof descripcion === 'string' ? descripcion.trim() : null, typeof activo === 'boolean' ? activo : null,
+     numero(req.body.orden)])
+    .catch(unico('Ya existe un producto con ese nombre en esa categoría'));
+  avisar('menu');
+  res.json({ ok: true });
+}));
+
+// ─── Grupos de opciones ("Proteína", "Bebida", "Término"...) ────────────────
+const validarSel = (min, max) => {
+  if (min !== null && !(min >= 0)) throw new ErrorApp('El mínimo debe ser 0 o más');
+  if (max !== null && !(max >= 1)) throw new ErrorApp('El máximo debe ser 1 o más');
+  if (min !== null && max !== null && max < min) throw new ErrorApp('El máximo no puede ser menor que el mínimo');
+};
+
+r.post('/productos/:id/grupos', admin, ah(async (req, res) => {
+  const nombre = texto(req.body.nombre);
+  const min = numero(req.body.min_sel) ?? 1;
+  const max = numero(req.body.max_sel) ?? 1;
+  if (!nombre) throw new ErrorApp('Escriba el nombre del grupo (ej: Proteína, Bebida)');
+  validarSel(min, max);
+  const { rows } = await pool.query(
+    `INSERT INTO grupo_opcion (producto_id, nombre, min_sel, max_sel, orden)
+     VALUES ($1, $2, $3, $4, (SELECT coalesce(max(orden), 0) + 1 FROM grupo_opcion WHERE producto_id = $1)) RETURNING *`,
+    [req.params.id, nombre, min, max]);
+  avisar('menu');
   res.json(rows[0]);
 }));
 
 r.patch('/grupos/:id', admin, ah(async (req, res) => {
-  const { nombre, min_sel, max_sel } = req.body;
+  const min = numero(req.body.min_sel);
+  const max = numero(req.body.max_sel);
+  validarSel(min, max);
   await pool.query(
     `UPDATE grupo_opcion SET nombre = coalesce($2, nombre), min_sel = coalesce($3, min_sel),
             max_sel = coalesce($4, max_sel) WHERE id = $1`,
-    [req.params.id, nombre, min_sel, max_sel]);
+    [req.params.id, texto(req.body.nombre), min, max]);
+  avisar('menu');
   res.json({ ok: true });
 }));
 
@@ -97,25 +141,31 @@ r.delete('/grupos/:id', admin, ah(async (req, res) => {
     if (e.code === '23503') throw new ErrorApp('Este grupo ya se usó en pedidos; desactive sus opciones en lugar de borrarlo');
     throw e;
   }
+  avisar('menu');
   res.json({ ok: true });
 }));
 
 r.post('/grupos/:id/opciones', admin, ah(async (req, res) => {
-  const { nombre, precio_extra = 0 } = req.body;
+  const nombre = texto(req.body.nombre);
+  const extra = numero(req.body.precio_extra) ?? 0;
+  if (!nombre) throw new ErrorApp('Escriba el nombre de la opción');
+  if (!(extra >= 0)) throw new ErrorApp('El precio extra debe ser 0 o más');
   const { rows } = await pool.query(
     `INSERT INTO opcion (grupo_id, nombre, precio_extra, orden)
      VALUES ($1, $2, $3, (SELECT coalesce(max(orden),0) + 1 FROM opcion WHERE grupo_id = $1)) RETURNING *`,
-    [req.params.id, nombre, precio_extra]);
+    [req.params.id, nombre, Math.round(extra)]);
   avisar('menu');
   res.json(rows[0]);
 }));
 
 r.patch('/opciones/:id', admin, ah(async (req, res) => {
-  const { nombre, precio_extra, activo } = req.body;
+  const { activo } = req.body;
+  const extra = numero(req.body.precio_extra);
+  if (extra !== null && !(extra >= 0)) throw new ErrorApp('El precio extra debe ser 0 o más');
   await pool.query(
     `UPDATE opcion SET nombre = coalesce($2, nombre), precio_extra = coalesce($3, precio_extra),
             activo = coalesce($4, activo) WHERE id = $1`,
-    [req.params.id, nombre, precio_extra, activo]);
+    [req.params.id, texto(req.body.nombre), extra === null ? null : Math.round(extra), typeof activo === 'boolean' ? activo : null]);
   avisar('menu');
   res.json({ ok: true });
 }));

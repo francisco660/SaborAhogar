@@ -402,3 +402,29 @@ tfoot td { font-weight: 800; border-top: 2px solid rgba(30,23,22,0.85); border-b
   70% { transform: scale(1); box-shadow: 0 0 0 20px rgba(255, 90, 54, 0); }
   100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 90, 54, 0); }
 }
+
+/* ─── Editor de menú ─────────────────────────────────────────────────────── */
+.enlace { background: none; border: 0; box-shadow: none; padding: 0; min-height: 0; color: var(--texto); text-align: left; cursor: pointer; font: inherit; }
+.enlace:hover { color: var(--rojo); text-decoration: underline; transform: none; }
+.menu-cabecera { flex-wrap: wrap; gap: .6rem; margin-bottom: .4rem; }
+.menu-cat { padding-top: .9rem; margin-top: .9rem; border-top: 1px solid rgba(80,47,40,0.12); }
+.menu-cat-cab { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .35rem; }
+.menu-cat-cab h3 { margin: 0; }
+.seccion-modal { border-top: 1px solid rgba(80,47,40,0.12); margin-top: 1rem; padding-top: .8rem; }
+.seccion-modal h4 { margin: 0 0 .3rem; }
+.grupo-edit { background: rgba(255,255,255,0.65); border: 1px solid var(--borde); border-radius: 14px; padding: .65rem .7rem; margin: .6rem 0; }
+.grupo-cab, .opcion-fila, .nuevo-grupo { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.grupo-cab input[name="nombre"] { font-weight: 800; }
+.opcion-fila { padding: .35rem 0 .35rem .8rem; border-left: 3px solid rgba(80,47,40,0.12); margin-top: .35rem; }
+.opcion-fila.inactiva input[name="nombre"] { text-decoration: line-through; color: var(--suave); }
+.opcion-fila.nueva { border-left-color: rgba(35,167,109,0.4); }
+.grupo-cab .crece, .opcion-fila .crece, .nuevo-grupo .crece { flex: 1 1 160px; min-width: 0; }
+.mini { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; font-weight: 700; color: var(--suave); margin: 0; }
+.mini input { width: 82px; }
+.mini-check { font-size: .82rem; }
+.receta-fila { display: grid; grid-template-columns: minmax(0, 1fr) 110px 2.5rem auto; gap: .4rem; align-items: center; margin-top: .4rem; }
+.receta-fila .unidad { font-size: .85rem; color: var(--suave); font-weight: 700; }
+@media (max-width: 640px) {
+  .mini input { width: 64px; }
+  .receta-fila { grid-template-columns: minmax(0, 1fr) 80px 2rem auto; }
+}
