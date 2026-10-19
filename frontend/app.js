@@ -207,25 +207,25 @@ const cssTicket = (ancho) => `
   h1 { font-size: 1.5em; text-align: center; margin: 0 0 .15em; line-height: 1.1; }
   p { margin: .2em 0; }
   .c { text-align: center; } .r { text-align: right; white-space: nowrap; }
-  .g { font-size: 1.15em; font-weight: 800; } .o { padding-left: .9em; font-size: .9em; }
-  .chico { font-size: .86em; } .b { font-weight: 800; }
+  .g { font-size: 1.15em; font-weight: 600; } .o { padding-left: .9em; font-size: .9em; }
+  .chico { font-size: .86em; } .b { font-weight: 600; }
   hr { border: 0; border-top: 1px dashed #000; margin: .45em 0; }
   hr.doble { border-top: 3px double #000; }
   table { width: 100%; border-collapse: collapse; }
   td, th { vertical-align: top; padding: .12em 0; }
   th { font-size: .82em; text-align: left; border-bottom: 1px solid #000; padding-bottom: .2em; }
-  .titulo { text-align: center; font-size: 1.2em; font-weight: 900; letter-spacing: .1em; margin: .3em 0; }
+  .titulo { text-align: center; font-size: 1.2em; font-weight: 700; letter-spacing: .1em; margin: .3em 0; }
   .sub { text-align: center; font-size: .82em; margin-top: -.2em; }
-  .invertido { background: #000; color: #fff; text-align: center; font-weight: 900; padding: .25em .3em; font-size: 1.6em; border-radius: 4px; margin: .25em 0; }
-  .datos td { font-size: .95em; } .datos td:first-child { width: 36%; font-weight: 700; }
+  .invertido { background: #000; color: #fff; text-align: center; font-weight: 700; padding: .25em .3em; font-size: 1.6em; border-radius: 4px; margin: .25em 0; }
+  .datos td { font-size: .95em; } .datos td:first-child { width: 36%; font-weight: 600; }
   .linea td { padding: .25em 0; border-bottom: 1px dotted #999; }
-  .linea .cant { width: 2.2em; font-weight: 800; }
-  .total td { font-size: 1.45em; font-weight: 900; padding-top: .2em; }
+  .linea .cant { width: 2.2em; font-weight: 600; }
+  .total td { font-size: 1.45em; font-weight: 700; padding-top: .2em; }
   .item-cmd { border-bottom: 1px dashed #000; padding: .35em 0; }
-  .item-cmd .n { font-size: 1.4em; font-weight: 900; line-height: 1.15; }
+  .item-cmd .n { font-size: 1.4em; font-weight: 700; line-height: 1.15; }
   .item-cmd .op { font-size: 1.08em; padding-left: 1em; }
   .item-cmd .ya { font-size: .85em; font-style: italic; }
-  .nota-cmd { border: 2px solid #000; padding: .2em .4em; margin-top: .25em; font-size: 1.1em; font-weight: 800; }
+  .nota-cmd { border: 2px solid #000; padding: .2em .4em; margin-top: .25em; font-size: 1.1em; font-weight: 600; }
   .aviso { border: 1px solid #000; padding: .3em .4em; font-size: .82em; margin: .35em 0; }
   .pie { text-align: center; font-size: .82em; margin-top: .5em; }
   .cufe { font-size: .68em; word-break: break-all; }
