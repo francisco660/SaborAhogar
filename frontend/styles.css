@@ -433,6 +433,38 @@ tfoot td { font-weight: 800; border-top: 2px solid rgba(30,23,22,0.85); border-b
   100% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--rojo) 0%, transparent); }
 }
 
+/* ─── Control de personal ─── */
+.reloj {
+  display: flex; align-items: center; gap: .6rem; width: 100%; text-align: left; padding: .6rem .7rem; border-radius: 14px;
+  background: rgba(74, 222, 128, 0.14); border: 1px solid rgba(74, 222, 128, 0.35); color: #fff; box-shadow: none; min-height: 0;
+}
+.reloj .punto { width: 12px; height: 12px; border-radius: 50%; background: #4ade80; flex: none; box-shadow: 0 0 0 4px rgba(74,222,128,0.2); }
+.reloj .txt { display: grid; line-height: 1.2; min-width: 0; }
+.reloj b { font-size: .9rem; }
+.reloj small { font-size: .72rem; opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reloj.activo { background: rgba(255, 99, 71, 0.16); border-color: rgba(255, 99, 71, 0.4); }
+.reloj.activo .punto { background: #ff6347; box-shadow: 0 0 0 4px rgba(255,99,71,0.22); animation: latido 1.6s ease-in-out infinite; }
+@keyframes latido { 50% { box-shadow: 0 0 0 7px rgba(255,99,71,0.08); } }
+body.lateral-mini .reloj { justify-content: center; padding: .6rem 0; }
+body.lateral-mini .reloj .txt { display: none; }
+.reloj-movil { margin-left: auto; background: #22a765; border: 0; color: #fff; min-height: 34px; padding: 0 .75rem; font-size: .82rem; box-shadow: none; }
+.reloj-movil.activo { background: #e5533d; }
+.lista-personal { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: .8rem; margin-top: 1rem; }
+.lista-personal .tarjeta + .tarjeta { margin-top: 0; }
+.persona { border-left: 5px solid var(--borde); }
+.persona.ok { border-left-color: #23a76d; }
+.persona.falta { border-left-color: #e5533d; }
+.persona.espera { border-left-color: var(--amarillo); }
+.persona.salio { border-left-color: #9aaaaf; }
+.persona .chico { margin-top: .3rem; }
+table.horarios th, table.horarios td { min-width: 104px; vertical-align: top; }
+table.horarios th:first-child, table.horarios td:first-child { min-width: 130px; }
+table.horarios .hoy { background: color-mix(in srgb, var(--amarillo) 10%, transparent); }
+.turno-chip { display: block; width: 100%; margin-bottom: .25rem; padding: .3rem .4rem; min-height: 0; font-size: .78rem; font-weight: 800;
+  background: color-mix(in srgb, var(--rojo) 12%, white); border: 1px solid color-mix(in srgb, var(--rojo) 30%, transparent); color: var(--texto); box-shadow: none; }
+.turno-mas { width: 100%; min-height: 0; padding: .15rem; font-size: .9rem; background: transparent; border: 1px dashed var(--borde); color: var(--suave); box-shadow: none; }
+.dias-semana { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: .2rem .8rem; }
+
 /* ─── Apariencia ─── */
 .temas { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: .5rem; margin: .5rem 0 1rem; }
 .tema-opcion { display: flex; flex-direction: column; align-items: stretch; gap: .35rem; padding: .45rem; font-size: .82rem; }

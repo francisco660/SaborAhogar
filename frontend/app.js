@@ -265,11 +265,12 @@ const NAV = [
   ['gastos', 'Gastos', ['cajero']],
   ['menu', 'Menú', []],
   ['reportes', 'Reportes', []],
+  ['personal', 'Personal', []],
   ['ajustes', 'Ajustes', []],
   ['restaurantes', 'Restaurantes', 'superadmin']
 ];
 const ICONO_NAV = { pedidos: '🧾', cocina: '🍳', domicilios: '🛵', caja: '💵', inventario: '📦', gastos: '💸',
-  menu: '📋', reportes: '📊', ajustes: '⚙️', restaurantes: '🏪' };
+  menu: '📋', reportes: '📊', personal: '👥', ajustes: '⚙️', restaurantes: '🏪' };
 // Vistas por rol; "superadmin" es solo para quien administra todos los restaurantes
 const puedeVer = (roles) => (roles === 'superadmin' ? !!S.usuario?.superadmin : tiene(...roles));
 const PERMISO_VISTA = { pedido: ['cajero', 'mesero'] };
@@ -299,7 +300,9 @@ $('#salir').addEventListener('click', () => salir());
 
 function salir() {
   S.usuario = null;
-  Object.assign(S, { menu: null, catActiva: null, ajustes: null, carrito: [], carritoClave: null });
+  Object.assign(S, { menu: null, catActiva: null, ajustes: null, carrito: [], carritoClave: null, miAsistencia: null, preguntoEntrada: false });
+  $('#reloj').hidden = true;
+  $('#reloj-movil').hidden = true;
   almacen.borrar('pos_usuario');
   cerrarEventos();
   $('#app').hidden = true;
@@ -326,6 +329,12 @@ async function iniciar() {
   almacen.guardar('pos_tema', temaDe(S.ajustes));
   pintarMarca();
   abrirEventos();
+  actualizarReloj().then(() => {
+    if (S.usuario?.rol !== 'admin' && S.miAsistencia && !S.miAsistencia.abierta && !S.preguntoEntrada) {
+      S.preguntoEntrada = true;
+      ejecutar(marcarReloj);
+    }
+  });
   if (!location.hash) location.hash = inicioRol();
   else navegar();
 }
@@ -453,6 +462,10 @@ function abrirEventos() {
   });
   fuente.addEventListener('pedidos', refrescar);
   fuente.addEventListener('caja', refrescar);
+  fuente.addEventListener('personal', () => {
+    actualizarReloj();
+    if (S.vista?.nombre === 'personal' && !$('.modal-fondo')) vistaPersonal($('#vista'));
+  });
   fuente.addEventListener('menu', () => {
     S.menu = null;
     if (S.vista?.nombre === 'pedido') cargarMenu().then(() => $('#prods') && pintarProductos()).catch(() => {});
@@ -1989,8 +2002,8 @@ async function vistaRestaurantes(el) {
         <div><label>Teléfono</label><input name="telefono"></div>
         <div><label>Número de mesas</label><input name="mesas" type="number" min="0" max="50" value="6"></div>
         <div><label>Copiar el menú de</label><select name="copiar_menu_de">
-          ${lista.map((r) => `<option value="${r.id}">${esc(r.nombre)}</option>`).join('')}
-          <option value="">— Empezar sin menú —</option></select></div>
+          <option value="">— Empezar sin menú —</option>
+          ${lista.map((r) => `<option value="${r.id}">${esc(r.nombre)}</option>`).join('')}</select></div>
       </div>
       <div class="etiqueta-seccion">Administrador del restaurante</div>
       <div class="campos">
@@ -1998,7 +2011,7 @@ async function vistaRestaurantes(el) {
         <div><label>Correo *</label><input name="admin_email" type="email" required></div>
         <div><label>Clave *</label><input name="admin_clave" type="password" minlength="6" required></div>
       </div>
-      <p class="chico suave">Se copian los productos, opciones, recetas e insumos (con stock en 0). Las ventas, clientes y usuarios no se copian.</p>
+      <p class="chico suave">Si copia el menú de otro restaurante, se copian productos, opciones, recetas e insumos (stock en 0); ventas, clientes y usuarios no. Para cargar una plantilla (ej. asados al barril) deje "Empezar sin menú".</p>
       <button class="primario">Crear restaurante</button>
     </form>`;
 
@@ -2033,10 +2046,277 @@ async function vistaRestaurantes(el) {
   };
 }
 
+// ═══ Control de personal ═════════════════════════════════════════════════════
+const duracion = (horas) => {
+  const min = Math.max(0, Math.round(Number(horas) * 60));
+  return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
+};
+const hm = (t) => String(t || '').slice(0, 5);
+// timestamptz → valor de <input type="datetime-local"> en hora de Colombia
+const aLocal = (d) => (d ? new Date(d).toLocaleString('sv-SE', { timeZone: 'America/Bogota' }).slice(0, 16).replace(' ', 'T') : '');
+const fechaLarga = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' });
+const lunesDe = (iso) => { const d = new Date(iso + 'T12:00:00'); return sumarDias(iso, -((d.getDay() + 6) % 7)); };
+
+// Botón de entrada/salida del propio trabajador (menú lateral y barra del celular)
+async function actualizarReloj() {
+  if (!S.usuario) return;
+  try { S.miAsistencia = await api('/asistencia/mia'); } catch { return; }
+  const { abierta, turnos } = S.miAsistencia;
+  const turno = turnos.length ? `Turno hoy ${turnos.map((t) => `${hm(t.hora_inicio)}–${hm(t.hora_fin)}`).join(', ')}` : 'Sin turno programado hoy';
+  const b = $('#reloj');
+  b.hidden = false;
+  b.classList.toggle('activo', !!abierta);
+  b.innerHTML = abierta
+    ? `<span class="punto"></span><span class="txt"><b>Marcar salida</b><small>Trabajando desde ${hora(abierta.entrada)}</small></span>`
+    : `<span class="punto"></span><span class="txt"><b>Marcar entrada</b><small>${esc(turno)}</small></span>`;
+  b.title = abierta ? `Entrada a las ${hora(abierta.entrada)}` : turno;
+  const m = $('#reloj-movil');
+  m.hidden = false;
+  m.classList.toggle('activo', !!abierta);
+  m.textContent = abierta ? '⏹ Salida' : '▶ Entrada';
+}
+
+async function marcarReloj() {
+  const abierta = S.miAsistencia?.abierta;
+  const ahora = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota' });
+  const ok = await confirmar(abierta
+    ? `¿Marcar tu salida ahora (${ahora})? Entraste a las ${hora(abierta.entrada)}.`
+    : `¿Marcar tu entrada ahora (${ahora})?`, { boton: abierta ? 'Marcar salida' : 'Marcar entrada' });
+  if (!ok) return;
+  const r = await api(abierta ? '/asistencia/salida' : '/asistencia/entrada', { method: 'POST' });
+  toast(abierta ? `Salida registrada: ${hora(r.salida)} · ${duracion((new Date(r.salida) - new Date(r.entrada)) / 3600000)}` : `Entrada registrada: ${hora(r.entrada)}`, 'ok', 5000);
+  actualizarReloj();
+}
+$('#reloj').addEventListener('click', () => ejecutar(marcarReloj));
+$('#reloj-movil').addEventListener('click', () => ejecutar(marcarReloj));
+
+// Ventana para registrar o corregir una entrada/salida
+function modalAsistencia(reg, personas, listo) {
+  abrirModal(`
+    ${cabeceraModal(reg?.id ? `Corregir registro de ${esc(reg.nombre)}` : 'Registro manual de entrada/salida')}
+    <form>
+      <div class="campos">
+        ${reg?.id ? '' : `<div style="grid-column:1/-1"><label>Trabajador *</label><select name="usuario_id" required>
+          ${personas.map((p) => `<option value="${p.id}" ${p.id === reg?.usuario_id ? 'selected' : ''}>${esc(p.nombre)} · ${ROL[p.rol]}</option>`).join('')}</select></div>`}
+        <div><label>Entrada *</label><input name="entrada" type="datetime-local" value="${aLocal(reg?.entrada) || aLocal(new Date())}" required></div>
+        <div><label>Salida</label><input name="salida" type="datetime-local" value="${aLocal(reg?.salida)}"></div>
+        <div style="grid-column:1/-1"><label>Motivo / nota</label><input name="nota" value="${esc(reg?.nota || '')}" placeholder="Ej: olvidó marcar la salida"></div>
+      </div>
+      <p class="chico suave">Deje la salida vacía si la persona sigue trabajando. Las correcciones quedan marcadas con su nombre.</p>
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar</button></div>
+    </form>`, {
+    submit: async (f, _m, cerrar) => {
+      const body = { entrada: f.entrada.value, salida: f.salida.value || null, nota: f.nota.value };
+      if (reg?.id) await api(`/asistencia/${reg.id}`, { method: 'PATCH', body });
+      else await api('/asistencia', { method: 'POST', body: { ...body, usuario_id: Number(f.usuario_id.value) } });
+      cerrar();
+      toast('Registro guardado', 'ok');
+      listo();
+    }
+  });
+}
+
+// Ventana para programar turnos (varios días a la vez) o editar uno
+function modalHorario({ turno, usuarioId, fecha, lunes, personas }, listo) {
+  const dias = Array.from({ length: 7 }, (_, i) => sumarDias(lunes, i));
+  abrirModal(`
+    ${cabeceraModal(turno ? 'Editar turno' : 'Programar turno')}
+    <form>
+      <div class="campos">
+        ${turno ? `<div style="grid-column:1/-1"><b>${esc(personas.find((p) => p.id === turno.usuario_id)?.nombre || '')}</b> · ${fechaLarga(turno.fecha)}</div>`
+        : `<div style="grid-column:1/-1"><label>Trabajador *</label><select name="usuario_id">
+            ${personas.map((p) => `<option value="${p.id}" ${p.id === usuarioId ? 'selected' : ''}>${esc(p.nombre)} · ${ROL[p.rol]}</option>`).join('')}</select></div>
+          <div style="grid-column:1/-1"><label>Días</label><div class="dias-semana">${dias.map((d) => `
+            <label class="check"><input type="checkbox" name="fechas" value="${d}" ${d === fecha ? 'checked' : ''}> ${fechaLarga(d)}</label>`).join('')}</div></div>`}
+        <div><label>Entra *</label><input name="hora_inicio" type="time" value="${hm(turno?.hora_inicio) || '08:00'}" required></div>
+        <div><label>Sale *</label><input name="hora_fin" type="time" value="${hm(turno?.hora_fin) || '16:00'}" required></div>
+        <div style="grid-column:1/-1"><label>Nota</label><input name="nota" value="${esc(turno?.nota || '')}" placeholder="Ej: cubre cocina"></div>
+      </div>
+      <div class="pie">
+        ${turno ? '<button type="button" class="peligro" data-acc="borrar" style="margin-right:auto">Eliminar turno</button>' : ''}
+        <button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar</button>
+      </div>
+    </form>`, {
+    borrar: async (_b, _m, cerrar) => {
+      await api(`/horarios/${turno.id}`, { method: 'DELETE' });
+      cerrar(); listo();
+    },
+    submit: async (f, _m, cerrar) => {
+      const body = { hora_inicio: f.hora_inicio.value, hora_fin: f.hora_fin.value, nota: f.nota.value };
+      if (turno) await api(`/horarios/${turno.id}`, { method: 'PATCH', body });
+      else {
+        const fechas = $$('input[name="fechas"]:checked', f).map((x) => x.value);
+        await api('/horarios', { method: 'POST', body: { ...body, usuario_id: Number(f.usuario_id.value), fechas } });
+      }
+      cerrar();
+      toast('Turno guardado', 'ok');
+      listo();
+    }
+  });
+}
+
+async function vistaPersonal(el) {
+  const P = S.personal ||= { tab: 'hoy', desde: hoyISO(), hasta: hoyISO(), usuario_id: '', lunes: lunesDe(hoyISO()) };
+  const { tolerancia, personas } = await api('/personal/hoy');
+  const pestañas = `<div class="tabs">${[['hoy', '🟢 Hoy'], ['registro', '🕒 Entradas y salidas'], ['horarios', '📅 Horarios']]
+    .map(([k, t]) => `<button class="${P.tab === k ? 'activo' : ''}" data-acc="tab" data-tab="${k}">${t}</button>`).join('')}</div>`;
+  const recargar = () => vistaPersonal(el);
+  const acc = {
+    tab: (b) => { P.tab = b.dataset.tab; recargar(); },
+    manual: () => modalAsistencia(null, personas, recargar)
+  };
+
+  if (P.tab === 'hoy') {
+    const ahora = new Date();
+    const estado = (p) => {
+      const turnos = p.turnos.map((t) => ({ ...t, ini: new Date(`${hoyISO()}T${hm(t.hora_inicio)}:00-05:00`) }));
+      const primero = turnos[0];
+      const tarde = primero && p.primera_entrada ? Math.round((new Date(p.primera_entrada) - primero.ini) / 60000) : 0;
+      const tardeTxt = tarde > tolerancia ? ` · <b class="negativo">llegó ${tarde} min tarde</b>` : '';
+      if (p.trabajando_desde) return { clase: 'ok', orden: 0, txt: `🟢 Trabajando desde ${hora(p.trabajando_desde)} (${duracion((ahora - new Date(p.trabajando_desde)) / 3600000)})${tardeTxt}` };
+      if (p.primera_entrada) return { clase: 'salio', orden: 2, txt: `⚪ Salió a las ${hora(p.ultima_salida)} · ${duracion(p.horas_hoy)} hoy${tardeTxt}` };
+      if (primero && ahora > new Date(primero.ini.getTime() + tolerancia * 60000)) return { clase: 'falta', orden: 1, txt: `🔴 No ha llegado · debía entrar a las ${hm(primero.hora_inicio)}` };
+      if (primero) return { clase: 'espera', orden: 3, txt: `🕒 Entra a las ${hm(primero.hora_inicio)}` };
+      return { clase: 'libre', orden: 4, txt: 'Sin turno hoy' };
+    };
+    const lista = personas.map((p) => ({ ...p, e: estado(p) })).sort((a, b) => a.e.orden - b.e.orden || a.nombre.localeCompare(b.nombre));
+    const n = (c) => lista.filter((p) => p.e.clase === c).length;
+    el.innerHTML = `
+      <div class="titulo-vista"><h2>Personal</h2><button data-acc="manual">+ Registro manual</button></div>
+      ${pestañas}
+      <div class="kpis">
+        <div class="kpi"><div class="t">Trabajando ahora</div><div class="v">${n('ok')}</div></div>
+        <div class="kpi"><div class="t">No han llegado</div><div class="v ${n('falta') ? 'negativo' : ''}">${n('falta')}</div><div class="s">tolerancia ${tolerancia} min</div></div>
+        <div class="kpi"><div class="t">Programados hoy</div><div class="v">${lista.filter((p) => p.turnos.length).length}</div></div>
+        <div class="kpi"><div class="t">Ya salieron</div><div class="v">${n('salio')}</div></div>
+      </div>
+      <div class="lista-personal">${lista.map((p) => `
+        <div class="tarjeta persona ${p.e.clase}">
+          <div class="entre"><div><b>${esc(p.nombre)}</b> <span class="admin-badge">${ROL[p.rol]}</span></div>
+            ${menuAcciones([
+              ...(p.abierta_id ? [{ acc: 'cerrarAhora', id: p.abierta_id, texto: '⏹ Marcar su salida ahora', extra: `data-entrada="${p.trabajando_desde}"` }]
+                : [{ acc: 'entradaAhora', id: p.id, texto: '▶ Marcar su entrada ahora' }]),
+              { acc: 'verRegistro', id: p.id, texto: '🕒 Ver sus entradas y salidas' }
+            ], p.nombre)}</div>
+          <div class="chico">${p.e.txt}</div>
+          ${p.turnos.length ? `<div class="chico suave">Turno: ${p.turnos.map((t) => `${hm(t.hora_inicio)}–${hm(t.hora_fin)}`).join(', ')}</div>` : ''}
+        </div>`).join('') || '<p class="vacio">No hay trabajadores activos.</p>'}</div>`;
+    S.acc = {
+      ...acc,
+      cerrarAhora: async (b) => {
+        await api(`/asistencia/${b.dataset.id}`, { method: 'PATCH', body: { entrada: aLocal(b.dataset.entrada), salida: aLocal(new Date()), nota: 'Salida marcada por el administrador' } });
+        toast('Salida registrada', 'ok'); recargar();
+      },
+      entradaAhora: async (b) => {
+        await api('/asistencia', { method: 'POST', body: { usuario_id: Number(b.dataset.id), entrada: aLocal(new Date()), nota: 'Entrada marcada por el administrador' } });
+        toast('Entrada registrada', 'ok'); recargar();
+      },
+      verRegistro: (b) => { Object.assign(P, { tab: 'registro', usuario_id: b.dataset.id, desde: sumarDias(hoyISO(), -6), hasta: hoyISO() }); recargar(); }
+    };
+    return;
+  }
+
+  if (P.tab === 'registro') {
+    const qs = `desde=${P.desde}&hasta=${P.hasta}${P.usuario_id ? `&usuario_id=${P.usuario_id}` : ''}`;
+    const { registros, resumen } = await api(`/asistencia?${qs}`);
+    const hoy = hoyISO();
+    const atajo = (lbl, d, h) => `<button type="button" class="peq" data-acc="rango" data-d="${d}" data-h="${h}">${lbl}</button>`;
+    el.innerHTML = `
+      <div class="titulo-vista"><h2>Personal</h2>
+        <div class="fila"><button data-acc="exportar" ${registros.length ? '' : 'disabled'}>⬇ Exportar CSV</button><button data-acc="manual">+ Registro manual</button></div></div>
+      ${pestañas}
+      <form class="tarjeta fila" data-submit="filtrar" style="margin-bottom:1rem">
+        <div><label>Desde</label><input type="date" name="desde" value="${P.desde}"></div>
+        <div><label>Hasta</label><input type="date" name="hasta" value="${P.hasta}"></div>
+        <div><label>Trabajador</label><select name="usuario_id"><option value="">Todos</option>
+          ${personas.map((p) => `<option value="${p.id}" ${String(p.id) === String(P.usuario_id) ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select></div>
+        <button style="align-self:flex-end">Ver</button>
+        <div class="fila" style="align-self:flex-end">${atajo('Hoy', hoy, hoy)}${atajo('Esta semana', lunesDe(hoy), hoy)}${atajo('Quincena', hoy.slice(8) <= '15' ? hoy.slice(0, 8) + '01' : hoy.slice(0, 8) + '16', hoy)}${atajo('Este mes', hoy.slice(0, 8) + '01', hoy)}</div>
+      </form>
+      <div class="tarjeta tabla-cont"><h3>Resumen</h3><table>
+        <thead><tr><th>Trabajador</th><th class="num">Días</th><th class="num">Horas</th><th class="num">Llegadas tarde</th></tr></thead>
+        <tbody>${resumen.map((x) => `<tr><td><b>${esc(x.nombre)}</b> <span class="admin-badge">${ROL[x.rol]}</span></td><td class="num">${x.dias}</td>
+          <td class="num">${duracion(x.horas)}</td><td class="num ${x.tardes ? 'negativo' : ''}">${x.tardes}</td></tr>`).join('')
+          || '<tr><td colspan="4" class="suave">Sin registros en este rango.</td></tr>'}</tbody></table></div>
+      <div class="tarjeta tabla-cont seccion"><h3>Detalle</h3><table>
+        <thead><tr><th>Fecha</th><th>Trabajador</th><th>Entrada</th><th>Salida</th><th class="num">Horas</th><th>Turno</th><th>Nota</th><th></th></tr></thead>
+        <tbody>${registros.map((x) => `<tr>
+          <td>${fechaLarga(new Date(x.entrada).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }))}</td>
+          <td>${esc(x.nombre)}</td>
+          <td>${hora(x.entrada)} ${x.minutos_tarde > tolerancia ? `<span class="chip anulado">${x.minutos_tarde} min tarde</span>` : ''}</td>
+          <td>${x.salida ? hora(x.salida) : '<span class="chip listo">trabajando</span>'}</td>
+          <td class="num">${duracion(x.horas)}</td>
+          <td class="chico">${x.hora_inicio ? `${hm(x.hora_inicio)}–${hm(x.hora_fin)}` : '<span class="suave">—</span>'}</td>
+          <td class="chico">${x.corregido ? `<span class="chip abierto" title="Por ${esc(x.registrado_por || '')}">corregido</span> ` : ''}${esc(x.nota || '')}</td>
+          <td class="derecha">${menuAcciones([
+            { acc: 'editar', id: x.id, texto: '✏️ Corregir horas' },
+            { acc: 'borrar', id: x.id, texto: '🗑️ Eliminar registro', peligro: true }
+          ], `${x.nombre} · ${fechaHora(x.entrada)}`)}</td></tr>`).join('')
+          || '<tr><td colspan="8" class="suave">Sin registros.</td></tr>'}</tbody></table></div>`;
+    S.acc = {
+      ...acc,
+      filtrar: (f) => { Object.assign(P, { desde: f.desde.value, hasta: f.hasta.value || f.desde.value, usuario_id: f.usuario_id.value }); recargar(); },
+      rango: (b) => { Object.assign(P, { desde: b.dataset.d, hasta: b.dataset.h }); recargar(); },
+      editar: (b) => modalAsistencia(registros.find((x) => x.id === Number(b.dataset.id)), personas, recargar),
+      borrar: async (b) => {
+        if (!(await confirmar('¿Eliminar este registro de entrada/salida?', { boton: 'Eliminar', peligro: true }))) return;
+        await api(`/asistencia/${b.dataset.id}`, { method: 'DELETE' });
+        recargar();
+      },
+      exportar: () => {
+        const filas = [['Fecha', 'Trabajador', 'Rol', 'Entrada', 'Salida', 'Horas', 'Turno', 'Minutos tarde', 'Nota']]
+          .concat(registros.map((x) => [aLocal(x.entrada).slice(0, 10), x.nombre, ROL[x.rol], hora(x.entrada), x.salida ? hora(x.salida) : '',
+            String(x.horas).replace('.', ','), x.hora_inicio ? `${hm(x.hora_inicio)}-${hm(x.hora_fin)}` : '', x.minutos_tarde ?? '', x.nota || '']));
+        const csv = '﻿' + filas.map((f) => f.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+        a.download = `asistencia_${P.desde}_a_${P.hasta}.csv`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+    };
+    return;
+  }
+
+  // Horarios de la semana
+  const dias = Array.from({ length: 7 }, (_, i) => sumarDias(P.lunes, i));
+  const turnos = await api(`/horarios?desde=${dias[0]}&hasta=${dias[6]}`);
+  const celda = (p, d) => turnos.filter((t) => t.usuario_id === p.id && t.fecha === d)
+    .map((t) => `<button type="button" class="turno-chip" data-acc="editarTurno" data-id="${t.id}" title="${esc(t.nota || 'Editar turno')}">${t.hora_inicio}–${t.hora_fin}</button>`).join('')
+    + `<button type="button" class="turno-mas" data-acc="nuevoTurno" data-u="${p.id}" data-f="${d}" aria-label="Agregar turno">+</button>`;
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Personal</h2>
+      <div class="fila"><button data-acc="copiar">⧉ Copiar semana anterior</button><button class="primario" data-acc="nuevoTurno">+ Programar turno</button></div></div>
+    ${pestañas}
+    <div class="tarjeta">
+      <div class="entre" style="margin-bottom:.6rem">
+        <button class="peq" data-acc="semana" data-n="-7">← Semana anterior</button>
+        <b>${fechaLarga(dias[0])} – ${fechaLarga(dias[6])}</b>
+        <button class="peq" data-acc="semana" data-n="7">Semana siguiente →</button>
+      </div>
+      <div class="tabla-cont"><table class="horarios">
+        <thead><tr><th>Trabajador</th>${dias.map((d) => `<th class="${d === hoyISO() ? 'hoy' : ''}">${fechaLarga(d)}</th>`).join('')}</tr></thead>
+        <tbody>${personas.map((p) => `<tr><td><b>${esc(p.nombre)}</b><div class="chico suave">${ROL[p.rol]}</div></td>
+          ${dias.map((d) => `<td class="${d === hoyISO() ? 'hoy' : ''}">${celda(p, d)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="chico suave">Toque un turno para editarlo o <b>+</b> para agregar. Si la hora de salida es menor que la de entrada, el turno termina al día siguiente.</p>
+    </div>`;
+  S.acc = {
+    ...acc,
+    semana: (b) => { P.lunes = sumarDias(P.lunes, Number(b.dataset.n)); recargar(); },
+    nuevoTurno: (b) => modalHorario({ usuarioId: Number(b.dataset.u) || personas[0]?.id, fecha: b.dataset.f, lunes: P.lunes, personas }, recargar),
+    editarTurno: (b) => modalHorario({ turno: turnos.find((t) => t.id === Number(b.dataset.id)), personas, lunes: P.lunes }, recargar),
+    copiar: async () => {
+      const r = await api('/horarios/copiar-semana', { method: 'POST', body: { lunes: P.lunes } });
+      toast(r.copiados ? `${r.copiados} turnos copiados de la semana anterior` : 'No había turnos nuevos para copiar', r.copiados ? 'ok' : '');
+      recargar();
+    }
+  };
+}
+
 const VISTAS = {
   pedidos: vistaPedidos, pedido: vistaPedido, cocina: vistaCocina, domicilios: vistaDomicilios, caja: vistaCaja,
   inventario: vistaInventario, gastos: vistaGastos, menu: vistaMenu, reportes: vistaReportes, ajustes: vistaAjustes,
-  restaurantes: vistaRestaurantes
+  restaurantes: vistaRestaurantes, personal: vistaPersonal
 };
 
 iniciar();
