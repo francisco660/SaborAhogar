@@ -2076,15 +2076,102 @@ async function actualizarReloj() {
   m.textContent = abierta ? '⏹ Salida' : '▶ Entrada';
 }
 
+// ─── Ubicación al marcar entrada/salida ─────────────────────────────────────
+// Pide la ubicación del celular (solo en el momento de marcar)
+function obtenerUbicacion() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation || !window.isSecureContext) {
+      return reject(new Error('Este navegador no permite tomar la ubicación (la app debe abrirse con https).'));
+    }
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, precision: p.coords.accuracy }),
+      (e) => reject(new Error({
+        1: 'No diste permiso de ubicación. Toca el candado 🔒 junto a la dirección de la página → Ubicación → Permitir, y vuelve a intentar.',
+        2: 'No se pudo obtener la ubicación. Activa el GPS / ubicación del celular y vuelve a intentar.',
+        3: 'La ubicación tardó demasiado. Sal a un lugar con mejor señal y vuelve a intentar.'
+      }[e.code] || 'No se pudo obtener la ubicación.')),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+  });
+}
+const exigeUbicacion = () => !!(S.ajustes?.ubicacion_lat && S.ajustes?.ubicacion_lng && S.ajustes?.exigir_ubicacion !== 'false');
+const metros = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1).replace('.', ',')} km` : `${Math.round(m)} m`);
+// Etiqueta "📍 a 35 m" (verde) o "📍 a 2,3 km · fuera" (roja), con link al mapa
+function chipUbicacion(lat, lng, precision, dist, radio) {
+  if (lat == null) return '';
+  const fuera = dist != null && dist > radio;
+  const txt = dist == null ? 'ver ubicación' : `a ${metros(dist)}${fuera ? ' · fuera' : ''}`;
+  const imprecisa = precision > 100 ? ` (±${metros(precision)})` : '';
+  return `<a class="ubic ${dist == null ? '' : fuera ? 'fuera' : 'dentro'}" target="_blank" rel="noopener"
+    href="https://www.google.com/maps?q=${lat},${lng}" title="Precisión ±${metros(precision || 0)}">📍 ${txt}${imprecisa}</a>`;
+}
+
+// Ventana para fijar la ubicación del restaurante y el radio permitido
+function modalUbicacionLocal(listo) {
+  const aj = S.ajustes || {};
+  abrirModal(`
+    ${cabeceraModal('📍 Ubicación del restaurante')}
+    <form>
+      <p class="chico suave">Párese dentro del restaurante y toque <b>Usar mi ubicación actual</b>. Al marcar entrada o salida se guarda dónde estaba
+        cada trabajador y a qué distancia del restaurante.</p>
+      <button type="button" data-acc="aqui" class="primario" style="width:100%">📍 Usar mi ubicación actual</button>
+      <div class="campos" style="margin-top:.8rem">
+        <div><label>Latitud</label><input name="lat" value="${esc(aj.ubicacion_lat || '')}" inputmode="decimal" placeholder="6.33"></div>
+        <div><label>Longitud</label><input name="lng" value="${esc(aj.ubicacion_lng || '')}" inputmode="decimal" placeholder="-75.55"></div>
+        <div><label>Radio permitido (metros)</label><input name="radio" type="number" min="20" step="10" value="${esc(aj.ubicacion_radio || 150)}"></div>
+        <label class="check" style="grid-column:1/-1"><input type="checkbox" name="exigir" ${aj.exigir_ubicacion === 'false' ? '' : 'checked'}>
+          Exigir la ubicación para poder marcar (si la niegan, no pueden marcar)</label>
+      </div>
+      <p class="chico" id="ubic-estado">${aj.ubicacion_lat ? `<a target="_blank" rel="noopener" href="https://www.google.com/maps?q=${aj.ubicacion_lat},${aj.ubicacion_lng}">Ver ubicación guardada en el mapa</a>` : 'Aún no hay ubicación guardada.'}</p>
+      <div class="pie">
+        ${aj.ubicacion_lat ? '<button type="button" class="peligro" data-acc="quitar" style="margin-right:auto">Quitar ubicación</button>' : ''}
+        <button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar</button>
+      </div>
+    </form>`, {
+    aqui: async (_b, m) => {
+      $('#ubic-estado', m).textContent = 'Obteniendo ubicación…';
+      const u = await obtenerUbicacion();
+      const f = $('form', m);
+      f.lat.value = u.lat.toFixed(6);
+      f.lng.value = u.lng.toFixed(6);
+      $('#ubic-estado', m).innerHTML = `Ubicación tomada (precisión ±${metros(u.precision)}). <a target="_blank" rel="noopener" href="https://www.google.com/maps?q=${u.lat},${u.lng}">Ver en el mapa</a> y luego Guardar.`;
+    },
+    quitar: async (_b, _m, cerrar) => {
+      await api('/ajustes', { method: 'PUT', body: { ubicacion_lat: '', ubicacion_lng: '' } });
+      S.ajustes = await api('/ajustes');
+      cerrar(); toast('Ubicación quitada', 'ok'); listo();
+    },
+    submit: async (f, _m, cerrar) => {
+      const lat = Number(f.lat.value), lng = Number(f.lng.value);
+      if (!f.lat.value || !f.lng.value || !(Math.abs(lat) <= 90) || !(Math.abs(lng) <= 180)) throw new Error('Tome o escriba una latitud y longitud válidas');
+      await api('/ajustes', { method: 'PUT', body: {
+        ubicacion_lat: String(lat), ubicacion_lng: String(lng),
+        ubicacion_radio: String(Math.max(20, Number(f.radio.value) || 150)), exigir_ubicacion: f.exigir.checked ? 'true' : 'false' } });
+      S.ajustes = await api('/ajustes');
+      cerrar(); toast('Ubicación del restaurante guardada', 'ok'); listo();
+    }
+  });
+}
+
 async function marcarReloj() {
   const abierta = S.miAsistencia?.abierta;
   const ahora = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Bogota' });
+  const aviso = exigeUbicacion() ? ' Se registrará tu ubicación actual.' : '';
   const ok = await confirmar(abierta
-    ? `¿Marcar tu salida ahora (${ahora})? Entraste a las ${hora(abierta.entrada)}.`
-    : `¿Marcar tu entrada ahora (${ahora})?`, { boton: abierta ? 'Marcar salida' : 'Marcar entrada' });
+    ? `¿Marcar tu salida ahora (${ahora})? Entraste a las ${hora(abierta.entrada)}.${aviso}`
+    : `¿Marcar tu entrada ahora (${ahora})?${aviso}`, { boton: abierta ? 'Marcar salida' : 'Marcar entrada' });
   if (!ok) return;
-  const r = await api(abierta ? '/asistencia/salida' : '/asistencia/entrada', { method: 'POST' });
-  toast(abierta ? `Salida registrada: ${hora(r.salida)} · ${duracion((new Date(r.salida) - new Date(r.entrada)) / 3600000)}` : `Entrada registrada: ${hora(r.entrada)}`, 'ok', 5000);
+  let ubic = {};
+  try {
+    toast('📍 Obteniendo tu ubicación…');
+    ubic = await obtenerUbicacion();
+  } catch (e) {
+    if (exigeUbicacion()) throw e;
+  }
+  const r = await api(abierta ? '/asistencia/salida' : '/asistencia/entrada', { method: 'POST', body: ubic });
+  const radio = Number(S.ajustes?.ubicacion_radio) || 150;
+  const lugar = r.distancia == null ? '' : r.distancia > radio ? ` · ⚠️ estás a ${metros(r.distancia)} del restaurante` : ` · 📍 en el restaurante`;
+  toast((abierta ? `Salida registrada: ${hora(r.salida)} · ${duracion((new Date(r.salida) - new Date(r.entrada)) / 3600000)}` : `Entrada registrada: ${hora(r.entrada)}`) + lugar,
+    r.distancia > radio ? 'error' : 'ok', 6000);
   actualizarReloj();
 }
 $('#reloj').addEventListener('click', () => ejecutar(marcarReloj));
@@ -2157,14 +2244,16 @@ function modalHorario({ turno, usuarioId, fecha, lunes, personas }, listo) {
 
 async function vistaPersonal(el) {
   const P = S.personal ||= { tab: 'hoy', desde: hoyISO(), hasta: hoyISO(), usuario_id: '', lunes: lunesDe(hoyISO()) };
-  const { tolerancia, personas } = await api('/personal/hoy');
+  const { tolerancia, radio, personas } = await api('/personal/hoy');
   const pestañas = `<div class="tabs">${[['hoy', '🟢 Hoy'], ['registro', '🕒 Entradas y salidas'], ['horarios', '📅 Horarios']]
     .map(([k, t]) => `<button class="${P.tab === k ? 'activo' : ''}" data-acc="tab" data-tab="${k}">${t}</button>`).join('')}</div>`;
   const recargar = () => vistaPersonal(el);
   const acc = {
     tab: (b) => { P.tab = b.dataset.tab; recargar(); },
-    manual: () => modalAsistencia(null, personas, recargar)
+    manual: () => modalAsistencia(null, personas, recargar),
+    ubicacionLocal: () => modalUbicacionLocal(recargar)
   };
+  const botonUbic = `<button data-acc="ubicacionLocal" title="Ubicación del restaurante">📍 ${S.ajustes?.ubicacion_lat ? 'Ubicación' : 'Configurar ubicación'}</button>`;
 
   if (P.tab === 'hoy') {
     const ahora = new Date();
@@ -2182,7 +2271,8 @@ async function vistaPersonal(el) {
     const lista = personas.map((p) => ({ ...p, e: estado(p) })).sort((a, b) => a.e.orden - b.e.orden || a.nombre.localeCompare(b.nombre));
     const n = (c) => lista.filter((p) => p.e.clase === c).length;
     el.innerHTML = `
-      <div class="titulo-vista"><h2>Personal</h2><button data-acc="manual">+ Registro manual</button></div>
+      <div class="titulo-vista"><h2>Personal</h2><div class="fila">${botonUbic}<button data-acc="manual">+ Registro manual</button></div></div>
+      ${S.ajustes?.ubicacion_lat ? '' : '<div class="tarjeta aviso-ubic">📍 Configure la <b>ubicación del restaurante</b> para saber si el personal marca desde el lugar de trabajo. <button class="peq primario" data-acc="ubicacionLocal">Configurar ahora</button></div>'}
       ${pestañas}
       <div class="kpis">
         <div class="kpi"><div class="t">Trabajando ahora</div><div class="v">${n('ok')}</div></div>
@@ -2199,6 +2289,7 @@ async function vistaPersonal(el) {
               { acc: 'verRegistro', id: p.id, texto: '🕒 Ver sus entradas y salidas' }
             ], p.nombre)}</div>
           <div class="chico">${p.e.txt}</div>
+          ${p.ubicacion_entrada ? `<div class="chico">Entrada ${chipUbicacion(p.ubicacion_entrada.lat, p.ubicacion_entrada.lng, p.ubicacion_entrada.precision, p.ubicacion_entrada.distancia, radio)}</div>` : ''}
           ${p.turnos.length ? `<div class="chico suave">Turno: ${p.turnos.map((t) => `${hm(t.hora_inicio)}–${hm(t.hora_fin)}`).join(', ')}</div>` : ''}
         </div>`).join('') || '<p class="vacio">No hay trabajadores activos.</p>'}</div>`;
     S.acc = {
@@ -2218,12 +2309,12 @@ async function vistaPersonal(el) {
 
   if (P.tab === 'registro') {
     const qs = `desde=${P.desde}&hasta=${P.hasta}${P.usuario_id ? `&usuario_id=${P.usuario_id}` : ''}`;
-    const { registros, resumen } = await api(`/asistencia?${qs}`);
+    const { registros, resumen, radio } = await api(`/asistencia?${qs}`);
     const hoy = hoyISO();
     const atajo = (lbl, d, h) => `<button type="button" class="peq" data-acc="rango" data-d="${d}" data-h="${h}">${lbl}</button>`;
     el.innerHTML = `
       <div class="titulo-vista"><h2>Personal</h2>
-        <div class="fila"><button data-acc="exportar" ${registros.length ? '' : 'disabled'}>⬇ Exportar CSV</button><button data-acc="manual">+ Registro manual</button></div></div>
+        <div class="fila">${botonUbic}<button data-acc="exportar" ${registros.length ? '' : 'disabled'}>⬇ Exportar CSV</button><button data-acc="manual">+ Registro manual</button></div></div>
       ${pestañas}
       <form class="tarjeta fila" data-submit="filtrar" style="margin-bottom:1rem">
         <div><label>Desde</label><input type="date" name="desde" value="${P.desde}"></div>
@@ -2234,17 +2325,20 @@ async function vistaPersonal(el) {
         <div class="fila" style="align-self:flex-end">${atajo('Hoy', hoy, hoy)}${atajo('Esta semana', lunesDe(hoy), hoy)}${atajo('Quincena', hoy.slice(8) <= '15' ? hoy.slice(0, 8) + '01' : hoy.slice(0, 8) + '16', hoy)}${atajo('Este mes', hoy.slice(0, 8) + '01', hoy)}</div>
       </form>
       <div class="tarjeta tabla-cont"><h3>Resumen</h3><table>
-        <thead><tr><th>Trabajador</th><th class="num">Días</th><th class="num">Horas</th><th class="num">Llegadas tarde</th></tr></thead>
+        <thead><tr><th>Trabajador</th><th class="num">Días</th><th class="num">Horas</th><th class="num">Llegadas tarde</th><th class="num">Fuera del lugar</th></tr></thead>
         <tbody>${resumen.map((x) => `<tr><td><b>${esc(x.nombre)}</b> <span class="admin-badge">${ROL[x.rol]}</span></td><td class="num">${x.dias}</td>
-          <td class="num">${duracion(x.horas)}</td><td class="num ${x.tardes ? 'negativo' : ''}">${x.tardes}</td></tr>`).join('')
-          || '<tr><td colspan="4" class="suave">Sin registros en este rango.</td></tr>'}</tbody></table></div>
+          <td class="num">${duracion(x.horas)}</td><td class="num ${x.tardes ? 'negativo' : ''}">${x.tardes}</td>
+          <td class="num ${x.fuera ? 'negativo' : ''}">${x.fuera}</td></tr>`).join('')
+          || '<tr><td colspan="5" class="suave">Sin registros en este rango.</td></tr>'}</tbody></table></div>
       <div class="tarjeta tabla-cont seccion"><h3>Detalle</h3><table>
         <thead><tr><th>Fecha</th><th>Trabajador</th><th>Entrada</th><th>Salida</th><th class="num">Horas</th><th>Turno</th><th>Nota</th><th></th></tr></thead>
         <tbody>${registros.map((x) => `<tr>
           <td>${fechaLarga(new Date(x.entrada).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }))}</td>
           <td>${esc(x.nombre)}</td>
-          <td>${hora(x.entrada)} ${x.minutos_tarde > tolerancia ? `<span class="chip anulado">${x.minutos_tarde} min tarde</span>` : ''}</td>
-          <td>${x.salida ? hora(x.salida) : '<span class="chip listo">trabajando</span>'}</td>
+          <td>${hora(x.entrada)} ${x.minutos_tarde > tolerancia ? `<span class="chip anulado">${x.minutos_tarde} min tarde</span>` : ''}
+            <div>${chipUbicacion(x.entrada_lat, x.entrada_lng, x.entrada_precision, x.entrada_distancia, radio)}</div></td>
+          <td>${x.salida ? hora(x.salida) : '<span class="chip listo">trabajando</span>'}
+            <div>${chipUbicacion(x.salida_lat, x.salida_lng, x.salida_precision, x.salida_distancia, radio)}</div></td>
           <td class="num">${duracion(x.horas)}</td>
           <td class="chico">${x.hora_inicio ? `${hm(x.hora_inicio)}–${hm(x.hora_fin)}` : '<span class="suave">—</span>'}</td>
           <td class="chico">${x.corregido ? `<span class="chip abierto" title="Por ${esc(x.registrado_por || '')}">corregido</span> ` : ''}${esc(x.nota || '')}</td>
@@ -2264,9 +2358,10 @@ async function vistaPersonal(el) {
         recargar();
       },
       exportar: () => {
-        const filas = [['Fecha', 'Trabajador', 'Rol', 'Entrada', 'Salida', 'Horas', 'Turno', 'Minutos tarde', 'Nota']]
-          .concat(registros.map((x) => [aLocal(x.entrada).slice(0, 10), x.nombre, ROL[x.rol], hora(x.entrada), x.salida ? hora(x.salida) : '',
-            String(x.horas).replace('.', ','), x.hora_inicio ? `${hm(x.hora_inicio)}-${hm(x.hora_fin)}` : '', x.minutos_tarde ?? '', x.nota || '']));
+        const filas = [['Fecha', 'Trabajador', 'Rol', 'Entrada', 'Distancia entrada (m)', 'Salida', 'Distancia salida (m)', 'Horas', 'Turno', 'Minutos tarde', 'Nota']]
+          .concat(registros.map((x) => [aLocal(x.entrada).slice(0, 10), x.nombre, ROL[x.rol], hora(x.entrada), x.entrada_distancia ?? '',
+            x.salida ? hora(x.salida) : '', x.salida_distancia ?? '', String(x.horas).replace('.', ','),
+            x.hora_inicio ? `${hm(x.hora_inicio)}-${hm(x.hora_fin)}` : '', x.minutos_tarde ?? '', x.nota || '']));
         const csv = '﻿' + filas.map((f) => f.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\r\n');
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));

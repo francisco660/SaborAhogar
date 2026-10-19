@@ -465,6 +465,12 @@ table.horarios .hoy { background: color-mix(in srgb, var(--amarillo) 10%, transp
 .turno-mas { width: 100%; min-height: 0; padding: .15rem; font-size: .9rem; background: transparent; border: 1px dashed var(--borde); color: var(--suave); box-shadow: none; }
 .dias-semana { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: .2rem .8rem; }
 
+.ubic { display: inline-block; margin-top: .2rem; font-size: .76rem; font-weight: 800; text-decoration: none; padding: .08rem .45rem; border-radius: 999px;
+  background: rgba(111, 91, 82, 0.1); color: var(--suave); white-space: nowrap; }
+.ubic.dentro { background: rgba(35, 167, 109, 0.14); color: #138a59; }
+.ubic.fuera { background: rgba(229, 83, 61, 0.14); color: #c63b26; }
+.aviso-ubic { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-bottom: 1rem; border-left: 5px solid var(--amarillo); }
+
 /* ─── Apariencia ─── */
 .temas { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: .5rem; margin: .5rem 0 1rem; }
 .tema-opcion { display: flex; flex-direction: column; align-items: stretch; gap: .35rem; padding: .45rem; font-size: .82rem; }

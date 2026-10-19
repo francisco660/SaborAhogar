@@ -13,6 +13,39 @@ const SQL_LOCAL = (n) => `($${n}::timestamp AT TIME ZONE 'America/Bogota')`;
 const fechaValida = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
 const horaValida = (v) => /^\d{2}:\d{2}$/.test(String(v || '').slice(0, 5));
 
+// ─── Ubicación al marcar ────────────────────────────────────────────────────
+// Distancia en metros entre dos puntos (fórmula de haversine)
+const distancia = (a, b) => {
+  const rad = (g) => (g * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(h));
+};
+
+// Valida la ubicación enviada por el celular y calcula la distancia al restaurante.
+// Si el restaurante tiene ubicación configurada (y no se desactivó la exigencia), es obligatoria.
+async function ubicacionMarcado(body = {}) {
+  const { rows } = await pool.query(
+    `SELECT clave, valor FROM ajuste WHERE clave IN ('ubicacion_lat', 'ubicacion_lng', 'exigir_ubicacion')`);
+  const aj = Object.fromEntries(rows.map((x) => [x.clave, x.valor]));
+  const local = aj.ubicacion_lat && aj.ubicacion_lng ? { lat: Number(aj.ubicacion_lat), lng: Number(aj.ubicacion_lng) } : null;
+  const lat = Number(body.lat);
+  const lng = Number(body.lng);
+  const valida = body.lat != null && body.lng != null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  if (!valida) {
+    if (local && aj.exigir_ubicacion !== 'false') {
+      throw new ErrorApp('Para marcar debe permitir el acceso a la ubicación del celular');
+    }
+    return { lat: null, lng: null, precision: null, distancia: null };
+  }
+  return {
+    lat, lng,
+    precision: Number.isFinite(Number(body.precision)) ? Math.round(Number(body.precision)) : null,
+    distancia: local ? Math.round(distancia(local, { lat, lng })) : null
+  };
+}
+
 // ─── El trabajador: su estado, marcar entrada y salida ──────────────────────
 r.get('/asistencia/mia', ah(async (req, res) => {
   const { rows: [abierta] } = await pool.query(
@@ -24,9 +57,12 @@ r.get('/asistencia/mia', ah(async (req, res) => {
 }));
 
 r.post('/asistencia/entrada', ah(async (req, res) => {
+  const u = await ubicacionMarcado(req.body);
   try {
     const { rows: [a] } = await pool.query(
-      `INSERT INTO asistencia (usuario_id) VALUES ($1) RETURNING id, entrada`, [req.usuario.id]);
+      `INSERT INTO asistencia (usuario_id, entrada_lat, entrada_lng, entrada_precision, entrada_distancia)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id, entrada, entrada_distancia AS distancia`,
+      [req.usuario.id, u.lat, u.lng, u.precision, u.distancia]);
     avisar('personal');
     res.json(a);
   } catch (e) {
@@ -36,9 +72,11 @@ r.post('/asistencia/entrada', ah(async (req, res) => {
 }));
 
 r.post('/asistencia/salida', ah(async (req, res) => {
+  const u = await ubicacionMarcado(req.body);
   const { rows: [a] } = await pool.query(
-    `UPDATE asistencia SET salida = now() WHERE usuario_id = $1 AND salida IS NULL RETURNING id, entrada, salida`,
-    [req.usuario.id]);
+    `UPDATE asistencia SET salida = now(), salida_lat = $2, salida_lng = $3, salida_precision = $4, salida_distancia = $5
+      WHERE usuario_id = $1 AND salida IS NULL RETURNING id, entrada, salida, salida_distancia AS distancia`,
+    [req.usuario.id, u.lat, u.lng, u.precision, u.distancia]);
   if (!a) throw new ErrorApp('No tiene una entrada abierta');
   avisar('personal');
   res.json(a);
@@ -47,10 +85,13 @@ r.post('/asistencia/salida', ah(async (req, res) => {
 // ─── Administrador: quién está hoy ──────────────────────────────────────────
 r.get('/personal/hoy', admin, ah(async (_req, res) => {
   const { rows: [aj] } = await pool.query(`SELECT valor FROM ajuste WHERE clave = 'tolerancia_llegada'`);
+  const { rows: [radio] } = await pool.query(`SELECT valor FROM ajuste WHERE clave = 'ubicacion_radio'`);
   const { rows } = await pool.query(`
     SELECT u.id, u.nombre, u.rol,
            (SELECT a.id FROM asistencia a WHERE a.usuario_id = u.id AND a.salida IS NULL) AS abierta_id,
            (SELECT a.entrada FROM asistencia a WHERE a.usuario_id = u.id AND a.salida IS NULL) AS trabajando_desde,
+           (SELECT json_build_object('lat', a.entrada_lat, 'lng', a.entrada_lng, 'precision', a.entrada_precision, 'distancia', a.entrada_distancia)
+              FROM asistencia a WHERE a.usuario_id = u.id AND a.salida IS NULL AND a.entrada_lat IS NOT NULL) AS ubicacion_entrada,
            (SELECT min(a.entrada) FROM asistencia a WHERE a.usuario_id = u.id AND a.entrada::date = current_date) AS primera_entrada,
            (SELECT max(a.salida) FROM asistencia a WHERE a.usuario_id = u.id AND a.entrada::date = current_date) AS ultima_salida,
            (SELECT coalesce(sum(extract(epoch FROM coalesce(a.salida, now()) - a.entrada)) / 3600, 0)
@@ -61,7 +102,7 @@ r.get('/personal/hoy', admin, ah(async (_req, res) => {
       FROM usuario u
      WHERE u.activo AND u.restaurante_id = restaurante_actual()
      ORDER BY u.nombre`);
-  res.json({ tolerancia: Number(aj?.valor ?? 10), personas: rows });
+  res.json({ tolerancia: Number(aj?.valor ?? 10), radio: Number(radio?.valor ?? 150), personas: rows });
 }));
 
 // ─── Administrador: registro de entradas y salidas ──────────────────────────
@@ -71,6 +112,8 @@ r.get('/asistencia', admin, ah(async (req, res) => {
   const { rows: [aj] } = await pool.query(`SELECT valor FROM ajuste WHERE clave = 'tolerancia_llegada'`);
   const { rows } = await pool.query(`
     SELECT a.id, a.usuario_id, u.nombre, u.rol, a.entrada, a.salida, a.nota, a.corregido,
+           a.entrada_lat, a.entrada_lng, a.entrada_precision, a.entrada_distancia,
+           a.salida_lat, a.salida_lng, a.salida_precision, a.salida_distancia,
            rp.nombre AS registrado_por,
            round((extract(epoch FROM coalesce(a.salida, now()) - a.entrada) / 3600)::numeric, 2) AS horas,
            h.hora_inicio, h.hora_fin,
@@ -88,16 +131,19 @@ r.get('/asistencia', admin, ah(async (req, res) => {
      ORDER BY a.entrada DESC`,
     [desde, hasta, usuario_id || null]);
   const tolerancia = Number(aj?.valor ?? 10);
+  const { rows: [radio] } = await pool.query(`SELECT valor FROM ajuste WHERE clave = 'ubicacion_radio'`);
+  const radioM = Number(radio?.valor ?? 150);
   // Resumen por trabajador
   const resumen = Object.values(rows.reduce((acc, x) => {
-    const p = acc[x.usuario_id] ||= { usuario_id: x.usuario_id, nombre: x.nombre, rol: x.rol, horas: 0, dias: new Set(), tardes: 0 };
+    const p = acc[x.usuario_id] ||= { usuario_id: x.usuario_id, nombre: x.nombre, rol: x.rol, horas: 0, dias: new Set(), tardes: 0, fuera: 0 };
     p.horas += Number(x.horas);
     p.dias.add(new Date(x.entrada).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }));
     if (x.minutos_tarde > tolerancia) p.tardes++;
+    if (x.entrada_distancia > radioM || x.salida_distancia > radioM) p.fuera++;
     return acc;
   }, {})).map((p) => ({ ...p, horas: Math.round(p.horas * 100) / 100, dias: p.dias.size }))
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
-  res.json({ tolerancia, registros: rows, resumen });
+  res.json({ tolerancia, radio: radioM, registros: rows, resumen });
 }));
 
 // Registro manual (olvidó marcar) o corrección
