@@ -6,7 +6,9 @@
 --      (lo ve en la pestaña Restaurantes del superadministrador).
 --
 --  BORRA (solo de ese restaurante): pedidos, ítems, pagos, turnos y retiros de
---          caja, gastos y movimientos de inventario (el stock queda en 0).
+--          caja, gastos, movimientos de inventario (el stock queda en 0) y
+--          documentos electrónicos de prueba.
+--  ¡No lo use después de emitir facturas reales a la DIAN!
 --  CONSERVA: usuarios, menú (categorías, productos, opciones, recetas),
 --          insumos, mesas, empleados, proveedores, clientes y ajustes.
 --
@@ -37,6 +39,10 @@ DECLARE
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM restaurante WHERE id = v_rest) THEN
     RAISE EXCEPTION 'No existe el restaurante %', v_rest;
+  END IF;
+  -- Documentos electrónicos de prueba (si existe la tabla de facturación)
+  IF to_regclass('pos.documento_electronico') IS NOT NULL THEN
+    EXECUTE 'DELETE FROM documento_electronico WHERE restaurante_id = $1' USING v_rest;
   END IF;
   DELETE FROM pago                  WHERE restaurante_id = v_rest;
   DELETE FROM movimiento_inventario WHERE restaurante_id = v_rest;

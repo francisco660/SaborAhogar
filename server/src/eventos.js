@@ -22,6 +22,12 @@ export function suscribir(req, res) {
   req.on('close', () => { clearInterval(latido); clientes.delete(cliente); });
 }
 
+// Avisa a los usuarios de un restaurante (para procesos en segundo plano)
+export function avisarA(restaurante, tipo, datos = {}) {
+  const msg = `event: ${tipo}\ndata: ${JSON.stringify(datos)}\n\n`;
+  for (const c of clientes) if (c.restaurante === restaurante) c.res.write(msg);
+}
+
 // Avisa a los usuarios del restaurante de la petición en curso, una vez guardados los cambios
 export function avisar(tipo, datos = {}) {
   const restaurante = contexto.getStore()?.restaurante_id;

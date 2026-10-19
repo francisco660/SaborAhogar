@@ -4,6 +4,7 @@ import { pool, tx } from '../db.js';
 import { permite } from '../auth.js';
 import { avisar } from '../eventos.js';
 import { ah, ErrorApp } from '../util.js';
+import { crearDocumento, leerConfig } from '../facturacion/documentos.js';
 
 const r = Router();
 const MEDIOS = ['EFECTIVO', 'NEQUI', 'DAVIPLATA', 'TARJETA', 'TRANSFERENCIA'];
@@ -22,7 +23,12 @@ const SQL_PEDIDOS = `
              'enviado_en', i.enviado_en, 'listo_en', i.listo_en,
              'opciones', (SELECT coalesce(jsonb_agg(o.nombre ORDER BY o.opcion_id), '[]')
                             FROM pedido_item_opcion o WHERE o.item_id = i.id)
-           ) ORDER BY i.id) FROM pedido_item i WHERE i.pedido_id = p.id), '[]') AS items
+           ) ORDER BY i.id) FROM pedido_item i WHERE i.pedido_id = p.id), '[]') AS items,
+         coalesce((SELECT jsonb_agg(jsonb_build_object(
+             'id', d.id, 'tipo', d.tipo, 'prefijo', d.prefijo, 'numero', d.numero, 'estado', d.estado,
+             'cufe', d.cufe, 'mensaje', d.mensaje, 'anulado', d.datos ? 'anulado_por',
+             'cliente', d.datos->'adquiriente'->>'nombre') ORDER BY d.id)
+           FROM documento_electronico d WHERE d.pedido_id = p.id), '[]') AS documentos
     FROM pedido p
     LEFT JOIN mesa m ON m.id = p.mesa_id
     LEFT JOIN cliente cl ON cl.id = p.cliente_id
@@ -270,7 +276,8 @@ r.post('/pedidos/:id/anular', permite('cajero'), ah(async (req, res) => {
 // por_liquidar = el domiciliario recibe el efectivo y lo entrega después en caja
 r.post('/pedidos/:id/cobrar', permite('cajero'), ah(async (req, res) => {
   const id = Number(req.params.id);
-  const { pagos = [], por_liquidar = false } = req.body;
+  const { pagos = [], por_liquidar = false, factura = null } = req.body;
+  let avisoFe = null;
   await tx(async (c) => {
     const { rows: [p] } = await c.query(`SELECT * FROM pedido WHERE id = $1 FOR UPDATE`, [id]);
     if (!p) throw new ErrorApp('Pedido no encontrado', 404);
@@ -293,9 +300,22 @@ r.post('/pedidos/:id/cobrar', permite('cajero'), ah(async (req, res) => {
       }
     }
     await c.query(`UPDATE pedido SET estado = 'pagado' WHERE id = $1`, [id]);
+
+    // Facturación electrónica: factura si el cliente la pidió; si no, POS electrónico.
+    // Un problema con la factura (p. ej. rango agotado) no impide cobrar: se avisa al cajero.
+    const cfg = await leerConfig(c);
+    if (cfg.fe_activa === 'true' && (factura?.cliente_fiscal_id || cfg.fe_auto_pos !== 'false')) {
+      try {
+        await tx((c2) => crearDocumento(c2, {
+          pedidoId: id, tipo: factura?.cliente_fiscal_id ? 'FACTURA' : 'POS',
+          clienteFiscalId: factura?.cliente_fiscal_id || null, usuarioId: req.usuario.id }));
+      } catch (e) {
+        avisoFe = `El pedido se cobró, pero no se generó el documento electrónico: ${e.message}`;
+      }
+    }
   });
   avisar('pedidos', { id });
-  res.json(await obtenerPedido(pool, id));
+  res.json({ ...(await obtenerPedido(pool, id)), aviso_fe: avisoFe });
 }));
 
 // ─── Domicilios ─────────────────────────────────────────────────────────────

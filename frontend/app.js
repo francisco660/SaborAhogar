@@ -261,6 +261,7 @@ const NAV = [
   ['cocina', 'Cocina', ['cajero', 'cocina']],
   ['domicilios', 'Domicilios', ['cajero', 'domiciliario']],
   ['caja', 'Caja', ['cajero']],
+  ['facturas', 'Facturas', ['cajero']],
   ['inventario', 'Inventario', ['cajero']],
   ['gastos', 'Gastos', ['cajero']],
   ['menu', 'Menú', []],
@@ -269,7 +270,7 @@ const NAV = [
   ['ajustes', 'Ajustes', []],
   ['restaurantes', 'Restaurantes', 'superadmin']
 ];
-const ICONO_NAV = { pedidos: '🧾', cocina: '🍳', domicilios: '🛵', caja: '💵', inventario: '📦', gastos: '💸',
+const ICONO_NAV = { pedidos: '🧾', cocina: '🍳', domicilios: '🛵', caja: '💵', facturas: '📄', inventario: '📦', gastos: '💸',
   menu: '📋', reportes: '📊', personal: '👥', ajustes: '⚙️', restaurantes: '🏪' };
 // Vistas por rol; "superadmin" es solo para quien administra todos los restaurantes
 const puedeVer = (roles) => (roles === 'superadmin' ? !!S.usuario?.superadmin : tiene(...roles));
@@ -462,6 +463,11 @@ function abrirEventos() {
   });
   fuente.addEventListener('pedidos', refrescar);
   fuente.addEventListener('caja', refrescar);
+  fuente.addEventListener('facturacion', (ev) => {
+    const d = JSON.parse(ev.data || '{}');
+    if (S.vista?.nombre === 'facturas' && !$('.modal-fondo')) vistaFacturas($('#vista'));
+    if (S.vista?.nombre === 'pedido' && String(S.vista.args[0]) === String(d.pedido_id)) pintarCuenta();
+  });
   fuente.addEventListener('personal', () => {
     actualizarReloj();
     if (S.vista?.nombre === 'personal' && !$('.modal-fondo')) vistaPersonal($('#vista'));
@@ -603,6 +609,13 @@ async function vistaPedido(el, id, tipo, mesaId) {
       location.hash = 'pedidos';
     },
     imprimirCuenta: () => imprimir(ticketPedido(S.pedido, 'cuenta')),
+    imprimirDoc: (b) => imprimirDocumento(Number(b.dataset.id)),
+    pedirFactura: () => modalFacturaPedido(S.pedido, pintarCuenta),
+    emitirPos: async () => {
+      const d = await api(`/pedidos/${S.pedido.id}/documento`, { method: 'POST', body: { tipo: 'POS' } });
+      toast(`POS electrónico ${numDoc(d)} en proceso`, 'ok');
+      pintarCuenta();
+    },
     imprimirComanda: () => imprimir(ticketPedido(S.pedido, 'comanda')),
     despachar: async () => {
       const did = $('#sel-domi').value;
@@ -833,6 +846,17 @@ async function pintarCuenta() {
           <option value="">Elegir…</option>${domis.map((d) => `<option value="${d.id}" ${d.id === p.domiciliario_id ? 'selected' : ''}>${esc(d.nombre)}</option>`).join('')}</select>
           <button class="peq aviso" data-acc="despachar">${p.domiciliario_id ? 'Cambiar' : 'Despachar'}</button></div>` : ''}`;
     }
+    if (p.documentos?.length || (p.estado === 'pagado' && feActiva())) {
+      const vig = documentoVigente(p);
+      acciones += `<div class="etiqueta-seccion">Facturación electrónica</div>
+        ${p.documentos.map((d) => `<div class="subtotal"><span>${TIPO_DOC[d.tipo]} ${esc(numDoc(d))}${d.cliente && d.tipo !== 'POS' ? ` · ${esc(d.cliente)}` : ''}</span>${chipDoc(d)}</div>`).join('')
+          || '<p class="chico suave">Sin documento electrónico.</p>'}
+        <div class="fila" style="margin-top:.4rem">
+          ${vig ? `<button class="peq" data-acc="imprimirDoc" data-id="${vig.id}">🖨️ ${vig.tipo === 'FACTURA' ? 'Factura' : 'POS electrónico'}</button>` : ''}
+          ${p.estado === 'pagado' && feActiva() && tiene('cajero') && vig?.tipo !== 'FACTURA' ? '<button class="peq primario" data-acc="pedirFactura">🧾 Factura electrónica</button>' : ''}
+          ${p.estado === 'pagado' && feActiva() && tiene('cajero') && !vig ? '<button class="peq" data-acc="emitirPos">Emitir POS electrónico</button>' : ''}
+        </div>`;
+    }
     if (p.pagos.length) {
       acciones += `<div class="etiqueta-seccion">Pagos</div>${p.pagos.map((pg) =>
         `<div class="subtotal"><span>${MEDIO[pg.medio]}${pg.por_liquidar ? ' (lo cobra el domiciliario)' : ''}</span><span>${pesos(pg.valor)}</span></div>`).join('')}`;
@@ -890,26 +914,35 @@ function modalCobro(p) {
         </div>
         <p id="restante" class="chico"></p>
       </div>
+      ${feActiva() ? bloqueFactura() : ''}
       <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="exito" id="btn-cobrar">Cobrar</button></div>
     </form>`, {
+    feElegir: (b) => fe.elegir(b),
     todo: (b, m) => {
       MEDIOS.forEach((x) => { m.querySelector(`[name=${x}]`).value = x === b.dataset.m ? p.total : ''; });
       recalcular(m);
     },
-    input: (_e, m) => recalcular(m),
-    change: (_e, m) => recalcular(m),
+    input: (e, m) => { recalcular(m); fe?.alCambiar(e); },
+    change: (e, m) => { recalcular(m); fe?.alCambiar(e); },
     submit: async (f, _m, cerrar) => {
       let body;
       if (f.liquidar?.checked) body = { por_liquidar: true };
       else body = { pagos: MEDIOS.map((x) => ({ medio: x, valor: Number(f[x].value) || 0 })).filter((x) => x.valor > 0) };
+      if (fe?.pidio()) body.factura = { cliente_fiscal_id: await fe.guardar() };
       const r = await api(`/pedidos/${p.id}/cobrar`, { method: 'POST', body });
       cerrar();
       toast(`Pedido #${p.numero} cobrado`, 'ok');
+      if (r.aviso_fe) toast(r.aviso_fe, 'error', 9000);
       S.pedido = r;
-      if (await confirmar('¿Imprimir el recibo?', { boton: 'Imprimir' })) imprimir(ticketPedido(r, 'cuenta'));
+      const doc = documentoVigente(r);
+      if (await confirmar(doc ? `¿Imprimir ${TIPO_DOC[doc.tipo].toLowerCase()} ${numDoc(doc)}?` : '¿Imprimir el recibo?', { boton: 'Imprimir' })) {
+        if (doc) await imprimirDocumento(doc.id);
+        else imprimir(ticketPedido(r, 'cuenta'));
+      }
       location.hash = 'pedidos';
     }
   });
+  const fe = feActiva() ? controlFactura(modal.m) : null;
   recalcular(modal.m);
   function recalcular(m) {
     const liquidar = m.querySelector('[name=liquidar]')?.checked;
@@ -1542,6 +1575,8 @@ function modalProducto(p, categoriaId) {
             `<option value="${c.id}" ${c.id === (prod?.categoria_id ?? categoriaId) ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}</select></div>
           <div><label>Precio *</label><input name="precio" type="number" min="0" step="100" value="${prod?.precio ?? ''}" required></div>
           <div><label>Orden</label><input name="orden" type="number" min="0" value="${prod?.orden ?? ''}" placeholder="Al final"></div>
+          <div><label>Impuesto (incluido en el precio)</label><select name="impuesto">${IMPUESTOS.map(([k, t]) =>
+            `<option value="${k}" ${k === `${prod?.impuesto_tipo ?? 'INC'}|${Number(prod?.impuesto_tasa ?? 8)}` ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
           <div style="grid-column: 1 / -1"><label>Descripción (lo que incluye)</label>
             <textarea name="descripcion" placeholder="Ej: Arroz, ensalada, papas y jugo natural">${esc(prod?.descripcion || '')}</textarea></div>
           ${prod ? `<label class="check" style="grid-column: 1 / -1"><input type="checkbox" name="activo" ${prod.activo ? 'checked' : ''}> Activo (se puede vender)</label>` : ''}
@@ -1610,8 +1645,9 @@ function modalProducto(p, categoriaId) {
       const v = (n) => f.elements[n]?.value;
       switch (f.dataset.form) {
         case 'datos': {
+          const [impuesto_tipo, impuesto_tasa] = v('impuesto').split('|');
           const body = { nombre: v('nombre'), categoria_id: Number(v('categoria_id')), precio: v('precio'),
-                         orden: v('orden'), descripcion: v('descripcion') };
+                         orden: v('orden'), descripcion: v('descripcion'), impuesto_tipo, impuesto_tasa: Number(impuesto_tasa) };
           if (prod) {
             body.activo = f.elements.activo.checked;
             await api(`/productos/${prod.id}`, { method: 'PATCH', body });
@@ -2408,10 +2444,318 @@ async function vistaPersonal(el) {
   };
 }
 
+// ═══ Facturación electrónica ═════════════════════════════════════════════════
+const feActiva = () => S.ajustes?.fe_activa === 'true';
+const TIPO_DOC = { POS: 'POS electrónico', FACTURA: 'Factura electrónica', NOTA_CREDITO: 'Nota crédito' };
+const ESTADO_DOC = { pendiente: 'Pendiente', enviando: 'Enviando', aceptado: 'Aceptado', rechazado: 'Rechazado', error: 'Error' };
+const CLASE_DOC = { pendiente: 'abierto', enviando: 'abierto', aceptado: 'pagado', rechazado: 'anulado', error: 'anulado' };
+const TIPOS_ID = { CC: 'Cédula de ciudadanía', NIT: 'NIT', CE: 'Cédula de extranjería', PP: 'Pasaporte', TI: 'Tarjeta de identidad', NIT_EXT: 'NIT de otro país', PEP: 'PEP' };
+const IMPUESTOS = [['INC|8', 'Impuesto al consumo (INC) 8 %'], ['IVA|19', 'IVA 19 %'], ['IVA|5', 'IVA 5 %'], ['EXCLUIDO|0', 'Excluido / sin impuesto']];
+const numDoc = (d) => `${d.prefijo || ''}${d.numero}`;
+const chipDoc = (d) => `<span class="chip ${CLASE_DOC[d.estado]}" title="${esc(d.mensaje || '')}">${d.anulado ? 'Anulado' : ESTADO_DOC[d.estado]}</span>`;
+
+// Dígito de verificación del NIT (algoritmo DIAN)
+function dvNit(nit) {
+  const n = String(nit || '').replace(/\D/g, '');
+  if (!n) return '';
+  const w = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71];
+  const r = [...n].reverse().reduce((s, d, i) => s + Number(d) * w[i], 0) % 11;
+  return String(r > 1 ? 11 - r : r);
+}
+
+// QR como imagen (librería qrcode-generator); si no cargó, no se dibuja
+function qrImg(texto, celda = 3) {
+  try {
+    const q = qrcode(0, 'M');
+    q.addData(texto);
+    q.make();
+    return q.createImgTag(celda, 4);
+  } catch { return ''; }
+}
+
+// Ticket del documento electrónico (POS, factura o nota crédito) para impresora de 80 mm
+function ticketDocumento(d) {
+  const x = d.datos;
+  const e = x.emisor;
+  const ad = x.adquiriente;
+  const res = x.resolucion;
+  return `<h1>${esc(e.nombre_comercial || e.razon_social)}</h1>
+    <p class="c">${esc(e.razon_social)}<br>NIT ${esc(e.nit)}${e.dv ? `-${esc(e.dv)}` : ''}${e.regimen ? `<br>${esc(e.regimen)}` : ''}
+      <br>${esc(e.direccion)} ${esc(e.municipio)}${e.telefono ? `<br>Tel. ${esc(e.telefono)}` : ''}</p><hr>
+    <p class="c g">${esc(x.documento.titulo.toUpperCase())}<br>No. ${esc(numDoc(x.documento))}</p>
+    <div>Fecha: ${esc(x.documento.fecha)} ${esc(x.documento.hora.slice(0, 5))} · Pedido #${esc(x.documento.pedido)}</div>
+    ${x.documento.ambiente !== 'produccion' ? '<p class="c g">*** DOCUMENTO DE PRUEBA — SIN VALIDEZ ***</p>' : ''}
+    ${x.referencia ? `<div>Corrige: ${esc(TIPO_DOC[x.referencia.tipo])} ${esc(x.referencia.prefijo)}${esc(x.referencia.numero)}</div><div>Motivo: ${esc(x.motivo || '')}</div>` : ''}
+    <hr><div>Cliente: ${esc(ad.nombre)}</div>
+    ${ad.consumidor_final ? '' : `<div>${esc(TIPOS_ID[ad.tipo_doc] || ad.tipo_doc)} ${esc(ad.numero)}${ad.dv ? `-${esc(ad.dv)}` : ''}</div>${ad.email ? `<div>${esc(ad.email)}</div>` : ''}`}
+    <hr><table>
+    ${x.items.map((i) => `<tr><td>${i.cantidad} ${esc(i.descripcion)}</td><td class="r">${pesos(i.total)}</td></tr>`).join('')}
+    </table><hr><table>
+      <tr><td>Subtotal (base)</td><td class="r">${pesos(x.totales.subtotal)}</td></tr>
+      ${x.totales.impuestos.map((t) => `<tr><td>${t.tipo} ${t.tasa}% (base ${pesos(t.base)})</td><td class="r">${pesos(t.valor)}</td></tr>`).join('')}
+      <tr><td class="g">TOTAL</td><td class="r g">${pesos(x.totales.total)}</td></tr>
+      ${x.pagos.map((p) => `<tr><td>${MEDIO[p.medio] || p.medio}</td><td class="r">${pesos(p.valor)}</td></tr>`).join('')}
+    </table><hr>
+    ${res?.numero ? `<p class="c" style="font-size:10px">Resolución DIAN ${esc(res.numero)}${res.fecha_desde ? ` del ${esc(res.fecha_desde)}` : ''}
+      · ${esc(res.prefijo)}${esc(res.desde)} a ${esc(res.prefijo)}${esc(res.hasta || '')}${res.fecha_hasta ? ` · vigente hasta ${esc(res.fecha_hasta)}` : ''}</p>` : ''}
+    ${d.cufe ? `<p style="font-size:9px;word-break:break-all">${x.documento.tipo === 'FACTURA' ? 'CUFE' : 'CUDE'}: ${esc(d.cufe)}</p>
+      ${d.qr ? `<p class="c">${qrImg(d.qr)}</p>` : ''}` : `<p class="c">Documento en proceso de validación DIAN (${esc(ESTADO_DOC[d.estado])})</p>`}
+    <p class="c" style="font-size:10px">Proveedor tecnológico: ${esc(d.proveedor || '')}</p>
+    <p class="c">${esc(S.ajustes?.pie_ticket || '¡Gracias por su compra!')}</p>`;
+}
+
+// Espera (unos segundos) a que la DIAN acepte el documento y lo imprime
+async function imprimirDocumento(id, espera = 8000) {
+  let d = await api(`/fe/documentos/${id}`);
+  const fin = Date.now() + espera;
+  while (['pendiente', 'enviando'].includes(d.estado) && Date.now() < fin) {
+    await new Promise((r) => setTimeout(r, 1000));
+    d = await api(`/fe/documentos/${id}`);
+  }
+  if (d.estado === 'rechazado' || d.estado === 'error') toast(`${TIPO_DOC[d.tipo]} ${numDoc(d)}: ${d.mensaje || ESTADO_DOC[d.estado]}`, 'error', 7000);
+  imprimir(ticketDocumento(d));
+}
+
+// Documento vigente (POS o factura no anulados) de un pedido
+const documentoVigente = (p) => (p.documentos || []).filter((d) => d.tipo !== 'NOTA_CREDITO' && !d.anulado && d.estado !== 'rechazado').pop();
+
+// Bloque del formulario de cobro para pedir factura electrónica
+const bloqueFactura = () => `
+  <label class="check" style="margin:.4rem 0"><input type="checkbox" name="pide_factura"> 🧾 El cliente pide <b>factura electrónica</b></label>
+  <div id="datos-factura" class="grupo-op" hidden>
+    <div class="fila"><input id="fe-buscar" class="crece" placeholder="Buscar por número de documento o nombre" autocomplete="off">
+      <span class="chico suave" id="fe-buscar-estado"></span></div>
+    <div id="fe-resultados" class="fe-resultados"></div>
+    <div class="campos" style="margin-top:.5rem">
+      <div><label>Tipo de documento</label><select name="fe_tipo_doc">${Object.entries(TIPOS_ID).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+      <div><label>Número *</label><input name="fe_numero" inputmode="numeric"></div>
+      <div><label>DV</label><input name="fe_dv" readonly placeholder="Auto (NIT)"></div>
+      <div style="grid-column:1/-1"><label>Nombre o razón social *</label><input name="fe_nombre"></div>
+      <div style="grid-column:1/-1"><label>Correo (allí le llega la factura) *</label><input name="fe_email" type="email"></div>
+      <div><label>Teléfono</label><input name="fe_telefono" inputmode="tel"></div>
+      <div><label>Dirección</label><input name="fe_direccion"></div>
+    </div>
+  </div>`;
+
+// Lógica del bloque de factura dentro de un modal: búsqueda, DV automático y guardado del cliente
+function controlFactura(m) {
+  let t;
+  const f = $('form', m);
+  const llenar = (c) => {
+    f.fe_tipo_doc.value = c.tipo_doc; f.fe_numero.value = c.numero; f.fe_dv.value = c.dv || '';
+    f.fe_nombre.value = c.nombre; f.fe_email.value = c.email; f.fe_telefono.value = c.telefono || ''; f.fe_direccion.value = c.direccion || '';
+    $('#fe-resultados', m).innerHTML = '';
+  };
+  return {
+    alCambiar(e) {
+      if (e.target.name === 'pide_factura') $('#datos-factura', m).hidden = !e.target.checked;
+      if (['fe_numero', 'fe_tipo_doc'].includes(e.target.name)) f.fe_dv.value = f.fe_tipo_doc.value === 'NIT' ? dvNit(f.fe_numero.value) : '';
+      if (e.target.id === 'fe-buscar') {
+        clearTimeout(t);
+        const q = e.target.value.trim();
+        if (q.length < 3) { $('#fe-resultados', m).innerHTML = ''; return; }
+        t = setTimeout(async () => {
+          const r = await api(`/fe/clientes?q=${encodeURIComponent(q)}`);
+          $('#fe-resultados', m).innerHTML = r.length
+            ? r.map((c, i) => `<button type="button" class="peq" data-acc="feElegir" data-i="${i}">${esc(c.nombre)} · ${esc(c.tipo_doc)} ${esc(c.numero)}</button>`).join('')
+            : '<span class="chico suave">No está registrado: llene los datos abajo.</span>';
+          m._feResultados = r;
+        }, 300);
+      }
+    },
+    elegir: (b) => llenar(m._feResultados[Number(b.dataset.i)]),
+    pidio: () => !!f.pide_factura?.checked,
+    // Crea o actualiza el cliente y devuelve su id
+    async guardar() {
+      const c = await api('/fe/clientes', { method: 'POST', body: {
+        tipo_doc: f.fe_tipo_doc.value, numero: f.fe_numero.value, nombre: f.fe_nombre.value, email: f.fe_email.value,
+        telefono: f.fe_telefono.value, direccion: f.fe_direccion.value, tipo_persona: f.fe_tipo_doc.value === 'NIT' ? 'juridica' : 'natural' } });
+      return c.id;
+    }
+  };
+}
+
+// Ventana para pedir factura electrónica de un pedido ya cobrado
+function modalFacturaPedido(p, listo) {
+  const vigente = documentoVigente(p);
+  const { m } = abrirModal(`
+    ${cabeceraModal(`Factura electrónica · pedido #${p.numero}`)}
+    <form>
+      ${vigente?.tipo === 'POS' ? `<p class="chico suave">El pedido tiene el POS electrónico ${esc(numDoc(vigente))}. Se anulará con una nota crédito y se emitirá la factura a nombre del cliente.</p>` : ''}
+      ${bloqueFactura()}
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Emitir factura</button></div>
+    </form>`, {
+    feElegir: (b) => ctl.elegir(b),
+    input: (e) => ctl.alCambiar(e),
+    change: (e) => ctl.alCambiar(e),
+    submit: async (f, _m, cerrar) => {
+      const cliente = await ctl.guardar();
+      const doc = await api(`/pedidos/${p.id}/documento`, { method: 'POST', body: { tipo: 'FACTURA', cliente_fiscal_id: cliente } });
+      cerrar();
+      toast(`Factura ${numDoc(doc)} en proceso`, 'ok');
+      listo?.();
+      if (await confirmar('¿Imprimir la factura?', { boton: 'Imprimir' })) await imprimirDocumento(doc.id);
+    }
+  });
+  const ctl = controlFactura(m);
+  m.querySelector('[name=pide_factura]').checked = true;
+  m.querySelector('[name=pide_factura]').closest('label').hidden = true;
+  $('#datos-factura', m).hidden = false;
+}
+
+// Vista "Facturas": documentos emitidos y configuración
+async function vistaFacturas(el) {
+  const F = S.facturas ||= { tab: 'documentos', desde: hoyISO(), hasta: hoyISO(), tipo: '', estado: '' };
+  if (F.tab === 'config' && !tiene()) F.tab = 'documentos';
+  const pestañas = `<div class="tabs">
+    <button class="${F.tab === 'documentos' ? 'activo' : ''}" data-acc="tab" data-tab="documentos">📄 Documentos</button>
+    ${tiene() ? `<button class="${F.tab === 'config' ? 'activo' : ''}" data-acc="tab" data-tab="config">⚙️ Configuración</button>` : ''}</div>`;
+  const recargar = () => vistaFacturas(el);
+  const acc = { tab: (b) => { F.tab = b.dataset.tab; recargar(); } };
+
+  if (F.tab === 'documentos') {
+    const docs = await api(`/fe/documentos?desde=${F.desde}&hasta=${F.hasta}${F.tipo ? `&tipo=${F.tipo}` : ''}${F.estado ? `&estado=${F.estado}` : ''}`);
+    const vigentes = docs.filter((d) => d.tipo !== 'NOTA_CREDITO' && d.estado === 'aceptado' && !d.anulado);
+    const suma = (t) => vigentes.reduce((s, d) => s + d.impuestos.filter((i) => i.tipo === t).reduce((a, i) => a + Number(i.valor), 0), 0);
+    const hoy = hoyISO();
+    const problemas = docs.filter((d) => ['error', 'rechazado'].includes(d.estado)).length;
+    el.innerHTML = `
+      <div class="titulo-vista"><h2>Facturación electrónica</h2></div>
+      ${pestañas}
+      ${feActiva() ? '' : `<div class="tarjeta aviso-ubic">⚠️ La facturación electrónica está <b>desactivada</b> para este restaurante.
+        ${tiene() ? '<button class="peq primario" data-acc="tab" data-tab="config">Configurar</button>' : 'Pida al administrador que la configure.'}</div>`}
+      ${S.ajustes?.fe_ambiente !== 'produccion' && feActiva() ? '<div class="tarjeta aviso-ubic">🧪 Ambiente de <b>pruebas</b>: los documentos no tienen validez ante la DIAN.</div>' : ''}
+      <form class="tarjeta fila" data-submit="filtrar" style="margin-bottom:1rem">
+        <div><label>Desde</label><input type="date" name="desde" value="${F.desde}"></div>
+        <div><label>Hasta</label><input type="date" name="hasta" value="${F.hasta}"></div>
+        <div><label>Tipo</label><select name="tipo"><option value="">Todos</option>${Object.entries(TIPO_DOC).map(([k, v]) => `<option value="${k}" ${F.tipo === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+        <div><label>Estado</label><select name="estado"><option value="">Todos</option>${Object.entries(ESTADO_DOC).map(([k, v]) => `<option value="${k}" ${F.estado === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+        <button style="align-self:flex-end">Ver</button>
+        <div class="fila" style="align-self:flex-end">
+          <button type="button" class="peq" data-acc="rango" data-d="${hoy}" data-h="${hoy}">Hoy</button>
+          <button type="button" class="peq" data-acc="rango" data-d="${hoy.slice(0, 8)}01" data-h="${hoy}">Este mes</button></div>
+      </form>
+      <div class="kpis">
+        <div class="kpi"><div class="t">Documentos vigentes</div><div class="v">${vigentes.length}</div></div>
+        <div class="kpi"><div class="t">Total facturado</div><div class="v">${pesos(vigentes.reduce((s, d) => s + Number(d.total), 0))}</div></div>
+        <div class="kpi"><div class="t">INC</div><div class="v">${pesos(suma('INC'))}</div></div>
+        <div class="kpi"><div class="t">IVA</div><div class="v">${pesos(suma('IVA'))}</div></div>
+        <div class="kpi ${problemas ? 'destacado' : ''}"><div class="t">Con error o rechazo</div><div class="v">${problemas}</div></div>
+      </div>
+      <div class="tarjeta tabla-cont seccion"><table>
+        <thead><tr><th>Fecha</th><th>Documento</th><th>Pedido</th><th>Cliente</th><th class="num">Total</th><th>Estado DIAN</th><th></th></tr></thead>
+        <tbody>${docs.map((d) => `<tr class="${d.anulado ? 'suave' : ''}">
+          <td>${fechaHora(d.creado_en)}</td>
+          <td><b>${TIPO_DOC[d.tipo]}</b> ${esc(numDoc(d))}${d.referencia ? `<div class="chico suave">corrige ${esc(d.referencia)}</div>` : ''}</td>
+          <td>#${d.pedido_numero}</td>
+          <td>${esc(d.cliente || '')}${d.cliente_doc && d.cliente_doc !== '222222222222' ? `<div class="chico suave">${esc(d.cliente_doc)}</div>` : ''}</td>
+          <td class="num">${pesos(d.total)}</td>
+          <td>${chipDoc(d)}${d.mensaje && d.estado !== 'aceptado' ? `<div class="chico negativo">${esc(d.mensaje)}</div>` : ''}</td>
+          <td class="derecha">${menuAcciones([
+            { acc: 'imprimir', id: d.id, texto: '🖨️ Imprimir' },
+            ...(d.qr ? [{ acc: 'verDian', id: d.id, texto: '🔎 Ver en la DIAN', extra: `data-qr="${esc(d.qr)}"` }] : []),
+            ...(d.pdf_url ? [{ acc: 'verPdf', id: d.id, texto: '📄 Ver PDF', extra: `data-pdf="${esc(d.pdf_url)}"` }] : []),
+            ...(['error', 'pendiente'].includes(d.estado) ? [{ acc: 'reintentar', id: d.id, texto: '🔁 Reintentar envío' }] : []),
+            ...(tiene() && d.tipo !== 'NOTA_CREDITO' && d.estado === 'aceptado' && !d.anulado ? [{ acc: 'notaCredito', id: d.id, texto: '↩️ Anular con nota crédito', peligro: true }] : [])
+          ], `${TIPO_DOC[d.tipo]} ${numDoc(d)}`)}</td></tr>`).join('')
+          || '<tr><td colspan="7" class="suave">Sin documentos en este rango.</td></tr>'}</tbody></table></div>`;
+    S.acc = {
+      ...acc,
+      filtrar: (f) => { Object.assign(F, { desde: f.desde.value, hasta: f.hasta.value || f.desde.value, tipo: f.tipo.value, estado: f.estado.value }); recargar(); },
+      rango: (b) => { Object.assign(F, { desde: b.dataset.d, hasta: b.dataset.h }); recargar(); },
+      imprimir: (b) => imprimirDocumento(Number(b.dataset.id), 0),
+      verDian: (b) => window.open(b.dataset.qr, '_blank', 'noopener'),
+      verPdf: (b) => window.open(b.dataset.pdf, '_blank', 'noopener'),
+      reintentar: async (b) => { await api(`/fe/documentos/${b.dataset.id}/reintentar`, { method: 'POST' }); toast('Reenviando…'); setTimeout(recargar, 1500); },
+      notaCredito: async (b) => {
+        const motivo = await confirmar('Se emitirá una nota crédito que anula este documento ante la DIAN. Escriba el motivo:',
+          { boton: 'Emitir nota crédito', peligro: true, campo: 'Motivo (ej: devolución, error en el valor)' });
+        if (!motivo) return;
+        const n = await api(`/fe/documentos/${b.dataset.id}/nota-credito`, { method: 'POST', body: { motivo } });
+        toast(`Nota crédito ${numDoc(n)} en proceso`, 'ok');
+        setTimeout(recargar, 1500);
+      }
+    };
+    return;
+  }
+
+  // Configuración (solo administrador)
+  const { config: c, proveedores, numeracion } = await api('/fe/config');
+  const v = (k) => esc(c[k] ?? '');
+  const usado = (tipo, prefijo) => numeracion.find((n) => n.tipo === tipo && n.prefijo === (prefijo || ''));
+  const resolucion = (k, titulo, tipo) => {
+    const u = usado(tipo, c[`fe_${k}_prefijo`]);
+    const hasta = Number(c[`fe_${k}_hasta`]) || 0;
+    return `<fieldset class="grupo-op"><legend>${titulo}</legend>
+      <div class="campos">
+        <div><label>No. de resolución DIAN</label><input name="fe_${k}_resolucion" value="${v(`fe_${k}_resolucion`)}"></div>
+        <div><label>Prefijo</label><input name="fe_${k}_prefijo" value="${v(`fe_${k}_prefijo`)}" maxlength="4" style="text-transform:uppercase"></div>
+        <div><label>Desde el número</label><input name="fe_${k}_desde" type="number" min="1" value="${v(`fe_${k}_desde`)}"></div>
+        <div><label>Hasta el número</label><input name="fe_${k}_hasta" type="number" min="1" value="${v(`fe_${k}_hasta`)}"></div>
+        <div><label>Vigente desde</label><input name="fe_${k}_fecha_desde" type="date" value="${v(`fe_${k}_fecha_desde`)}"></div>
+        <div><label>Vigente hasta</label><input name="fe_${k}_fecha_hasta" type="date" value="${v(`fe_${k}_fecha_hasta`)}"></div>
+      </div>
+      <p class="chico suave">${u ? `Último emitido: <b>${esc(c[`fe_${k}_prefijo`] || '')}${u.ultimo}</b> · ${u.emitidos} emitidos${hasta ? ` · quedan ${Math.max(0, hasta - u.ultimo)}` : ''}` : 'Aún no se ha emitido ninguno.'}</p>
+    </fieldset>`;
+  };
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Facturación electrónica</h2></div>
+    ${pestañas}
+    <form class="tarjeta" data-submit="guardar" id="form-fe">
+      <fieldset class="grupo-op"><legend>Proveedor tecnológico</legend>
+        <label class="check"><input type="checkbox" name="fe_activa" ${c.fe_activa === 'true' ? 'checked' : ''}> <b>Activar facturación electrónica</b> en este restaurante</label>
+        <label class="check"><input type="checkbox" name="fe_auto_pos" ${c.fe_auto_pos === 'false' ? '' : 'checked'}> Emitir <b>POS electrónico</b> automáticamente en cada cobro (si el cliente no pide factura)</label>
+        <div class="campos" style="margin-top:.5rem">
+          <div><label>Proveedor</label><select name="fe_proveedor">${proveedores.map((p) => `<option value="${p.id}" ${c.fe_proveedor === p.id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select></div>
+          <div><label>Ambiente</label><select name="fe_ambiente">
+            <option value="pruebas" ${c.fe_ambiente !== 'produccion' ? 'selected' : ''}>Pruebas (habilitación)</option>
+            <option value="produccion" ${c.fe_ambiente === 'produccion' ? 'selected' : ''}>Producción (validez ante la DIAN)</option></select></div>
+          <div style="grid-column:1/-1"><label>URL de la API</label><input name="fe_api_url" value="${v('fe_api_url')}" placeholder="La entrega el proveedor"></div>
+          <div><label>Usuario / ID de cliente</label><input name="fe_api_usuario" value="${v('fe_api_usuario')}" autocomplete="off"></div>
+          <div><label>Token / clave de la API</label><input name="fe_api_token" type="password" value="${v('fe_api_token')}" autocomplete="new-password" placeholder="Pegue el token"></div>
+        </div>
+      </fieldset>
+      <fieldset class="grupo-op"><legend>Datos del emisor (su empresa, como aparecen en el RUT)</legend>
+        <div class="campos">
+          <div><label>NIT (sin DV)</label><input name="fe_nit" value="${v('fe_nit')}" inputmode="numeric"></div>
+          <div><label>DV</label><input name="fe_dv" value="${v('fe_dv')}" readonly placeholder="Automático"></div>
+          <div style="grid-column:1/-1"><label>Razón social</label><input name="fe_razon_social" value="${v('fe_razon_social')}"></div>
+          <div><label>Tipo de persona</label><select name="fe_tipo_persona">
+            <option value="natural" ${c.fe_tipo_persona !== 'juridica' ? 'selected' : ''}>Persona natural</option>
+            <option value="juridica" ${c.fe_tipo_persona === 'juridica' ? 'selected' : ''}>Persona jurídica</option></select></div>
+          <div><label>Régimen / responsabilidad IVA</label><input name="fe_regimen" value="${v('fe_regimen')}" placeholder="Ej: No responsable de IVA"></div>
+          <div><label>Responsabilidad fiscal (RUT)</label><input name="fe_responsabilidad" value="${v('fe_responsabilidad') || 'R-99-PN'}"></div>
+          <div><label>Correo de facturación</label><input name="fe_email" type="email" value="${v('fe_email')}"></div>
+          <div><label>Municipio</label><input name="fe_municipio" value="${v('fe_municipio')}" placeholder="${esc(S.ajustes?.ciudad || 'Ej: Bello')}"></div>
+        </div>
+        <p class="chico suave">La dirección y el teléfono se toman de Ajustes → Datos del negocio.</p>
+      </fieldset>
+      ${resolucion('pos', 'Resolución del POS electrónico', 'POS')}
+      ${resolucion('fac', 'Resolución de la factura electrónica', 'FACTURA')}
+      <fieldset class="grupo-op"><legend>Notas crédito</legend>
+        <div class="campos"><div><label>Prefijo</label><input name="fe_nc_prefijo" value="${v('fe_nc_prefijo') || 'NC'}" maxlength="4"></div></div>
+      </fieldset>
+      <div class="fila"><button class="primario">Guardar configuración</button><button type="button" data-acc="probar">🔌 Probar conexión</button></div>
+    </form>`;
+  S.acc = {
+    ...acc,
+    _input: (e) => { if (e.target.name === 'fe_nit') $('#form-fe').fe_dv.value = dvNit(e.target.value); },
+    guardar: async (f) => {
+      const body = Object.fromEntries([...f.elements].filter((x) => x.name).map((x) => [x.name, x.type === 'checkbox' ? String(x.checked) : x.value]));
+      ['fe_pos_prefijo', 'fe_fac_prefijo', 'fe_nc_prefijo'].forEach((k) => { body[k] = body[k].toUpperCase(); });
+      await api('/fe/config', { method: 'PUT', body });
+      S.ajustes = await api('/ajustes');
+      toast('Configuración de facturación guardada', 'ok');
+      recargar();
+    },
+    probar: async () => { const r = await api('/fe/probar', { method: 'POST' }); toast(r.mensaje, 'ok', 6000); }
+  };
+}
+
 const VISTAS = {
   pedidos: vistaPedidos, pedido: vistaPedido, cocina: vistaCocina, domicilios: vistaDomicilios, caja: vistaCaja,
   inventario: vistaInventario, gastos: vistaGastos, menu: vistaMenu, reportes: vistaReportes, ajustes: vistaAjustes,
-  restaurantes: vistaRestaurantes, personal: vistaPersonal
+  restaurantes: vistaRestaurantes, personal: vistaPersonal, facturas: vistaFacturas
 };
 
 iniciar();

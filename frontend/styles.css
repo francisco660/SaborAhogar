@@ -471,6 +471,10 @@ table.horarios .hoy { background: color-mix(in srgb, var(--amarillo) 10%, transp
 .ubic.fuera { background: rgba(229, 83, 61, 0.14); color: #c63b26; }
 .aviso-ubic { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-bottom: 1rem; border-left: 5px solid var(--amarillo); }
 
+/* ─── Facturación electrónica ─── */
+.fe-resultados { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .4rem; }
+#datos-factura { margin-top: .4rem; }
+
 /* ─── Apariencia ─── */
 .temas { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: .5rem; margin: .5rem 0 1rem; }
 .tema-opcion { display: flex; flex-direction: column; align-items: stretch; gap: .35rem; padding: .45rem; font-size: .82rem; }

@@ -32,13 +32,16 @@ export const contexto = new AsyncLocalStorage();
 
 // pool.query usa la transacción de la petición en curso; fuera de una petición
 // (login, superadmin, salud) usa una conexión normal del dueño de las tablas.
+// Transacción de la petición en curso, si sigue abierta
+const enCurso = () => { const ctx = contexto.getStore(); return ctx && !ctx.cerrado ? ctx : null; };
+
 export const pool = {
-  query: (...args) => (contexto.getStore()?.client ?? raw).query(...args)
+  query: (...args) => (enCurso()?.client ?? raw).query(...args)
 };
 
 // Ejecuta fn(client) dentro de una transacción (o un savepoint si ya hay una)
 export async function tx(fn) {
-  const ctx = contexto.getStore();
+  const ctx = enCurso();
   if (ctx) {
     await ctx.client.query('SAVEPOINT tx');
     try {

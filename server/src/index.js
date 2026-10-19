@@ -15,6 +15,8 @@ import caja from './rutas/caja.js';
 import inventario from './rutas/inventario.js';
 import admin from './rutas/admin.js';
 import personal from './rutas/personal.js';
+import facturacion from './rutas/facturacion.js';
+import { iniciarReintentos } from './facturacion/documentos.js';
 
 if (!process.env.JWT_SECRET) {
   console.error('Falta JWT_SECRET en server/.env');
@@ -40,7 +42,7 @@ app.get('/api/eventos', requiereAuth, suscribir);
 // El superadministrador trabaja por fuera de un restaurante (ve todos)
 app.use('/api/superadmin', requiereAuth, soloSuperadmin, superadmin);
 // Todo lo demás corre dentro del restaurante del usuario (ver conRestaurante en db.js)
-app.use('/api', requiereAuth, conRestaurante, menu, pedidos, caja, inventario, admin, personal);
+app.use('/api', requiereAuth, conRestaurante, menu, pedidos, caja, inventario, admin, personal, facturacion);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 
 app.use(express.static(path.resolve(__dirname, '../../frontend')));
@@ -57,3 +59,4 @@ app.use((err, _req, res, _next) => {
 
 const port = Number(process.env.PORT) || 4100;
 app.listen(port, () => console.log(`POS listo en http://localhost:${port}`));
+iniciarReintentos();

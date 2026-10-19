@@ -15,6 +15,7 @@ r.get('/menu', ah(async (req, res) => {
       coalesce(jsonb_agg(jsonb_build_object(
         'id', p.id, 'nombre', p.nombre, 'descripcion', p.descripcion, 'precio', p.precio,
         'activo', p.activo, 'orden', p.orden, 'categoria_id', p.categoria_id,
+        'impuesto_tipo', p.impuesto_tipo, 'impuesto_tasa', p.impuesto_tasa,
         'costo_base', round(cp.costo_base),
         'grupos', coalesce((
           SELECT jsonb_agg(jsonb_build_object(
@@ -40,6 +41,14 @@ const admin = permite();
 const unico = (mensaje) => (e) => {
   if (e.code === '23505') throw new ErrorApp(mensaje);
   throw e;
+};
+// Impuesto del producto (precio con impuesto incluido): INC 8 %, IVA 19 % / 5 % o excluido
+const impuesto = ({ impuesto_tipo: t, impuesto_tasa: tasa }) => {
+  if (t === undefined || t === null || t === '') return { tipo: null, tasa: null };
+  if (!['INC', 'IVA', 'EXCLUIDO'].includes(t)) throw new ErrorApp('Impuesto inválido');
+  const v = t === 'EXCLUIDO' ? 0 : Number(tasa);
+  if (!(v >= 0 && v <= 100)) throw new ErrorApp('Tarifa de impuesto inválida');
+  return { tipo: t, tasa: v };
 };
 const texto = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const numero = (v) => (v === undefined || v === null || v === '' ? null : Number(v));
@@ -74,11 +83,13 @@ r.post('/productos', admin, ah(async (req, res) => {
   if (!req.body.categoria_id) throw new ErrorApp('Elija la categoría');
   if (!nombre) throw new ErrorApp('Escriba el nombre del producto');
   if (!(precio >= 0)) throw new ErrorApp('Escriba un precio válido');
+  const imp = impuesto(req.body);
   const { rows } = await pool.query(
-    `INSERT INTO producto (categoria_id, nombre, precio, descripcion, orden)
-     VALUES ($1, $2, $3, $4, coalesce($5, (SELECT coalesce(max(orden), 0) + 1 FROM producto WHERE categoria_id = $1)))
+    `INSERT INTO producto (categoria_id, nombre, precio, descripcion, orden, impuesto_tipo, impuesto_tasa)
+     VALUES ($1, $2, $3, $4, coalesce($5, (SELECT coalesce(max(orden), 0) + 1 FROM producto WHERE categoria_id = $1)),
+             coalesce($6, 'INC'), coalesce($7, 8))
      RETURNING *`,
-    [req.body.categoria_id, nombre, Math.round(precio), texto(req.body.descripcion), numero(req.body.orden)])
+    [req.body.categoria_id, nombre, Math.round(precio), texto(req.body.descripcion), numero(req.body.orden), imp.tipo, imp.tasa])
     .catch(unico('Ya existe un producto con ese nombre en esa categoría'));
   avisar('menu');
   res.json(rows[0]);
@@ -91,11 +102,12 @@ r.patch('/productos/:id', admin, ah(async (req, res) => {
   await pool.query(
     `UPDATE producto SET categoria_id = coalesce($2, categoria_id), nombre = coalesce($3, nombre),
             precio = coalesce($4, precio), descripcion = CASE WHEN $5::text IS NULL THEN descripcion ELSE nullif($5, '') END,
-            activo = coalesce($6, activo), orden = coalesce($7, orden)
+            activo = coalesce($6, activo), orden = coalesce($7, orden),
+            impuesto_tipo = coalesce($8, impuesto_tipo), impuesto_tasa = coalesce($9, impuesto_tasa)
       WHERE id = $1`,
     [req.params.id, categoria_id || null, texto(req.body.nombre), precio === null ? null : Math.round(precio),
      typeof descripcion === 'string' ? descripcion.trim() : null, typeof activo === 'boolean' ? activo : null,
-     numero(req.body.orden)])
+     numero(req.body.orden), impuesto(req.body).tipo, impuesto(req.body).tasa])
     .catch(unico('Ya existe un producto con ese nombre en esa categoría'));
   avisar('menu');
   res.json({ ok: true });

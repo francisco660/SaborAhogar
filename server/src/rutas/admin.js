@@ -172,7 +172,8 @@ r.delete('/mesas/:id', admin, ah(async (req, res) => {
 
 // ─── Ajustes del negocio ────────────────────────────────────────────────────
 r.get('/ajustes', ah(async (_req, res) => {
-  const { rows } = await pool.query(`SELECT clave, valor FROM ajuste`);
+  // El token del proveedor de facturación nunca sale del servidor
+  const { rows } = await pool.query(`SELECT clave, valor FROM ajuste WHERE clave <> 'fe_api_token'`);
   res.json(Object.fromEntries(rows.map((x) => [x.clave, x.valor])));
 }));
 
