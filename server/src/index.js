@@ -16,6 +16,7 @@ import inventario from './rutas/inventario.js';
 import admin from './rutas/admin.js';
 import personal from './rutas/personal.js';
 import facturacion from './rutas/facturacion.js';
+import contabilidad from './rutas/contabilidad.js';
 import { iniciarReintentos } from './facturacion/documentos.js';
 
 if (!process.env.JWT_SECRET) {
@@ -42,7 +43,7 @@ app.get('/api/eventos', requiereAuth, suscribir);
 // El superadministrador trabaja por fuera de un restaurante (ve todos)
 app.use('/api/superadmin', requiereAuth, soloSuperadmin, superadmin);
 // Todo lo demás corre dentro del restaurante del usuario (ver conRestaurante en db.js)
-app.use('/api', requiereAuth, conRestaurante, menu, pedidos, caja, inventario, admin, personal, facturacion);
+app.use('/api', requiereAuth, conRestaurante, menu, pedidos, caja, inventario, admin, personal, facturacion, contabilidad);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 
 app.use(express.static(path.resolve(__dirname, '../../frontend')));

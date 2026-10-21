@@ -388,12 +388,13 @@ const NAV = [
   ['gastos', 'Gastos', ['cajero']],
   ['menu', 'Menú', []],
   ['reportes', 'Reportes', []],
+  ['contabilidad', 'Contabilidad', []],
   ['personal', 'Personal', []],
   ['ajustes', 'Ajustes', []],
   ['restaurantes', 'Restaurantes', 'superadmin']
 ];
 const ICONO_NAV = { pedidos: '🧾', cocina: '🍳', domicilios: '🛵', caja: '💵', facturas: '📄', inventario: '📦', gastos: '💸',
-  menu: '📋', reportes: '📊', personal: '👥', ajustes: '⚙️', restaurantes: '🏪' };
+  menu: '📋', reportes: '📊', contabilidad: '📚', personal: '👥', ajustes: '⚙️', restaurantes: '🏪' };
 // Vistas por rol; "superadmin" es solo para quien administra todos los restaurantes
 const puedeVer = (roles) => (roles === 'superadmin' ? !!S.usuario?.superadmin : tiene(...roles));
 const PERMISO_VISTA = { pedido: ['cajero', 'mesero'] };
@@ -2880,10 +2881,204 @@ async function vistaFacturas(el) {
   };
 }
 
+// ═══ Contabilidad: informe para el contador (renta, IVA/INC, exógena) ════════
+const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const nombreMes = (ym) => `${MESES[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+const ultimoDia = (anio, mes) => new Date(Number(anio), Number(mes), 0).getDate();
+
+// Carga una librería externa solo cuando se necesita
+const scripts = {};
+const cargarScript = (src) => (scripts[src] ||= new Promise((ok, mal) => {
+  const s = document.createElement('script');
+  s.src = src; s.onload = ok; s.onerror = () => mal(new Error('No se pudo cargar la librería (revise la conexión a internet)'));
+  document.head.appendChild(s);
+}));
+
+// Imprime un documento en hoja carta (para guardarlo como PDF desde el diálogo de impresión)
+function imprimirHoja(html, titulo) {
+  const f = document.createElement('iframe');
+  f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(f);
+  const d = f.contentDocument;
+  d.open();
+  d.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(titulo)}</title><style>
+    @page { size: letter; margin: 14mm; }
+    body { font: 11px/1.4 Arial, Helvetica, sans-serif; color: #111; }
+    h1 { font-size: 18px; margin: 0; } h2 { font-size: 13px; margin: 16px 0 6px; border-bottom: 2px solid #333; padding-bottom: 3px; }
+    .cab { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px double #333; padding-bottom: 8px; }
+    .muted { color: #555; } table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+    th, td { border-bottom: 1px solid #ddd; padding: 3px 5px; text-align: left; } th { background: #f1f1f1; font-weight: 600; }
+    td.n, th.n { text-align: right; white-space: nowrap; } tr.t td { font-weight: 700; border-top: 2px solid #333; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } .nota { font-size: 9.5px; color: #555; margin-top: 18px; }
+  </style></head><body>${html}</body></html>`);
+  d.close();
+  setTimeout(() => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 3000); }, 250);
+}
+
+async function vistaContabilidad(el) {
+  const hoy = hoyISO();
+  const C = S.conta ||= { anio: hoy.slice(0, 4), mes: '' };
+  const desde = C.mes ? `${C.anio}-${C.mes}-01` : `${C.anio}-01-01`;
+  const hasta = C.mes ? `${C.anio}-${C.mes}-${ultimoDia(C.anio, C.mes)}` : `${C.anio}-12-31`;
+  const periodo = C.mes ? `${MESES[Number(C.mes) - 1]} de ${C.anio}` : `Año ${C.anio}`;
+  const inf = await api(`/contabilidad/informe?desde=${desde}&hasta=${hasta}`);
+  const R = inf.resumen;
+  const anios = Array.from({ length: 6 }, (_, i) => String(Number(hoy.slice(0, 4)) - i));
+  const cat = (k) => CATEGORIAS_GASTO[k] || k;
+  const estado = [
+    ['Ingresos brutos (ventas con impuestos)', R.ingresos_brutos],
+    ['(−) Impuesto al consumo (INC) generado', -R.inc],
+    ['(−) IVA generado', -R.iva],
+    ['= Ingresos netos (sin impuestos)', R.ingresos_netos, 't'],
+    ['(−) Costo de ventas (recetas)', -R.costo_ventas],
+    ['= Utilidad bruta', R.utilidad_bruta, 't'],
+    ['(−) Mermas y ajustes de inventario', -R.mermas],
+    ['(−) Gastos operativos', -R.gastos_operativos],
+    ['= Utilidad antes de impuestos', R.utilidad_antes_impuestos, 't']
+  ];
+
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Contabilidad</h2>
+      <div class="fila">
+        <button data-acc="excel" class="primario">⬇ Excel para el contador</button>
+        <button data-acc="pdf">🖨️ Informe PDF</button>
+      </div></div>
+    <form class="tarjeta fila" data-submit="periodo" style="margin-bottom:1rem">
+      <div><label>Año</label><select name="anio">${anios.map((a) => `<option ${a === C.anio ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+      <div><label>Periodo</label><select name="mes"><option value="">Todo el año</option>
+        ${MESES.map((m, i) => { const v = String(i + 1).padStart(2, '0'); return `<option value="${v}" ${v === C.mes ? 'selected' : ''}>${m}</option>`; }).join('')}</select></div>
+      <button style="align-self:flex-end">Ver</button>
+      <span class="suave chico" style="align-self:flex-end">${periodo} · ${desde} a ${hasta}</span>
+    </form>
+    <div class="kpis">
+      <div class="kpi"><div class="t">Ingresos netos (sin impuestos)</div><div class="v">${pesos(R.ingresos_netos)}</div><div class="s">${R.pedidos} ventas · ticket prom. ${pesos(R.ticket_promedio)}</div></div>
+      <div class="kpi"><div class="t">Impuestos generados</div><div class="v">${pesos(R.inc + R.iva)}</div><div class="s">INC ${pesos(R.inc)} · IVA ${pesos(R.iva)}</div></div>
+      <div class="kpi"><div class="t">Costos y gastos</div><div class="v">${pesos(R.costo_ventas + R.mermas + R.gastos_operativos)}</div><div class="s">compras de insumos ${pesos(R.compras_insumos)}</div></div>
+      <div class="kpi destacado"><div class="t">Utilidad antes de impuestos</div><div class="v ${R.utilidad_antes_impuestos < 0 ? 'negativo' : ''}">${pesos(R.utilidad_antes_impuestos)}</div></div>
+    </div>
+    <div class="dos-col seccion">
+      <div class="tarjeta tabla-cont"><h3>Estado de resultados</h3><table>
+        <tbody>${estado.map(([k, v, t]) => `<tr class="${t ? 'fila-total' : ''}"><td>${k}</td><td class="num ${v < 0 ? 'negativo' : ''}">${pesos(v)}</td></tr>`).join('')}</tbody></table>
+        <p class="chico suave">Nómina pagada: ${pesos(R.nomina)} (incluida en gastos) · Inventario valorizado hoy: ${pesos(R.inventario_actual)}</p></div>
+      <div>
+        <div class="tarjeta tabla-cont"><h3>Impuestos por tarifa</h3><table>
+          <thead><tr><th>Impuesto</th><th class="num">Base</th><th class="num">Impuesto</th><th class="num">Total</th></tr></thead>
+          <tbody>${inf.impuestos.map((x) => `<tr><td>${x.tipo === 'EXCLUIDO' || !x.tasa ? 'Excluido / sin impuesto' : `${x.tipo} ${x.tasa}%`}</td>
+            <td class="num">${pesos(x.base)}</td><td class="num">${pesos(x.impuesto)}</td><td class="num">${pesos(x.total)}</td></tr>`).join('')
+            || '<tr><td colspan="4" class="suave">Sin ventas</td></tr>'}</tbody></table></div>
+        <div class="tarjeta tabla-cont"><h3>Ingresos por medio de pago</h3><table>
+          <tbody>${inf.medios.map((m) => `<tr><td>${MEDIO[m.medio] || m.medio}</td><td class="num">${m.pedidos}</td><td class="num">${pesos(m.valor)}</td></tr>`).join('')
+            || '<tr><td class="suave">—</td></tr>'}</tbody></table></div>
+      </div>
+    </div>
+    <div class="tarjeta tabla-cont seccion"><h3>Mes a mes</h3><table>
+      <thead><tr><th>Mes</th><th class="num">Ventas</th><th class="num">Ingresos brutos</th><th class="num">INC + IVA</th><th class="num">Ingresos netos</th>
+        <th class="num">Costo ventas</th><th class="num">Gastos</th><th class="num">Compras insumos</th><th class="num">Utilidad</th></tr></thead>
+      <tbody>${inf.mensual.map((m) => `<tr><td>${nombreMes(m.mes)}</td><td class="num">${m.pedidos}</td><td class="num">${pesos(m.ingresos_brutos)}</td>
+        <td class="num">${pesos(m.inc + m.iva)}</td><td class="num">${pesos(m.ingresos_netos)}</td><td class="num">${pesos(m.costo_ventas)}</td>
+        <td class="num">${pesos(m.gastos + m.mermas)}</td><td class="num">${pesos(m.compras)}</td>
+        <td class="num ${m.utilidad < 0 ? 'negativo' : ''}"><b>${pesos(m.utilidad)}</b></td></tr>`).join('')
+        || '<tr><td colspan="9" class="suave">Sin movimientos en el periodo.</td></tr>'}</tbody></table></div>
+    <div class="dos-col seccion">
+      <div class="tarjeta tabla-cont"><h3>Gastos por categoría</h3><table>
+        <tbody>${inf.gastos_por_categoria.map((g) => `<tr><td>${cat(g.categoria)}</td><td class="num">${g.cantidad}</td><td class="num">${pesos(g.valor)}</td></tr>`).join('')
+          || '<tr><td class="suave">Sin gastos</td></tr>'}</tbody></table></div>
+      <div class="tarjeta tabla-cont"><h3>Compras por proveedor</h3><table>
+        <thead><tr><th>Proveedor</th><th>NIT</th><th class="num">Valor</th></tr></thead>
+        <tbody>${inf.proveedores.map((x) => `<tr><td>${esc(x.proveedor)}</td><td>${esc(x.nit || '—')}</td><td class="num">${pesos(x.valor)}</td></tr>`).join('')
+          || '<tr><td colspan="3" class="suave">Sin compras a proveedores registrados</td></tr>'}</tbody></table>
+        ${inf.proveedores.some((x) => !x.nit) ? '<p class="chico negativo">Hay proveedores sin NIT: complételos en Gastos → Proveedores (el contador los necesita para la exógena).</p>' : ''}</div>
+    </div>
+    <div class="tarjeta seccion"><h3>Documentos electrónicos del periodo</h3>
+      <p class="chico">${R.documentos_vigentes} documentos vigentes por ${pesos(R.facturado_electronicamente)} ·
+        ${inf.documentos.filter((d) => d.tipo === 'NOTA_CREDITO').length} notas crédito ·
+        ${inf.documentos.filter((d) => ['error', 'rechazado', 'pendiente'].includes(d.estado)).length} con error o pendientes</p>
+    </div>
+    <p class="chico suave">Este informe se genera con lo registrado en el sistema (ventas cobradas, gastos y compras). Es un apoyo para su contador;
+      no reemplaza la contabilidad formal ni la asesoría tributaria. Los impuestos se calculan con la tarifa configurada en cada producto.</p>`;
+
+  S.acc = {
+    periodo: (f) => { Object.assign(C, { anio: f.anio.value, mes: f.mes.value }); vistaContabilidad(el); },
+    excel: async () => {
+      toast('Preparando el Excel…');
+      await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+      const X = window.XLSX;
+      const libro = X.utils.book_new();
+      const hoja = (nombre, filas, anchos) => {
+        const h = X.utils.aoa_to_sheet(filas);
+        if (anchos) h['!cols'] = anchos.map((w) => ({ wch: w }));
+        X.utils.book_append_sheet(libro, h, nombre);
+      };
+      const e = inf.empresa;
+      hoja('Resumen', [
+        [e.fe_razon_social || e.nombre_negocio || ''], [e.fe_nit ? `NIT ${e.fe_nit}${e.fe_dv ? '-' + e.fe_dv : ''}` : ''],
+        [`Periodo: ${periodo} (${desde} a ${hasta})`], [`Generado: ${fechaHora(new Date())}`], [],
+        ['Concepto', 'Valor'], ...estado.map(([k, v]) => [k, v]), [],
+        ['Ventas (cantidad)', R.pedidos], ['Ticket promedio', R.ticket_promedio], ['Compras de insumos (al inventario)', R.compras_insumos],
+        ['Nómina pagada (incluida en gastos)', R.nomina], ['Inventario valorizado hoy', R.inventario_actual],
+        ['Documentos electrónicos vigentes', R.documentos_vigentes], ['Total facturado electrónicamente', R.facturado_electronicamente], [],
+        ['Medio de pago', 'Ventas', 'Valor'], ...inf.medios.map((m) => [MEDIO[m.medio] || m.medio, m.pedidos, Number(m.valor)])
+      ], [45, 18, 18]);
+      hoja('Mensual', [['Mes', 'Ventas', 'Ingresos brutos', 'INC', 'IVA', 'Ingresos netos', 'Costo de ventas', 'Mermas', 'Gastos', 'Compras insumos', 'Utilidad'],
+        ...inf.mensual.map((m) => [nombreMes(m.mes), m.pedidos, m.ingresos_brutos, m.inc, m.iva, m.ingresos_netos, m.costo_ventas, m.mermas, m.gastos, m.compras, m.utilidad])],
+        [16, 8, 15, 12, 12, 15, 15, 12, 12, 15, 14]);
+      hoja('Impuestos', [['Impuesto', 'Tarifa %', 'Base', 'Impuesto', 'Total con impuesto'],
+        ...inf.impuestos.map((x) => [x.tipo, x.tasa, x.base, x.impuesto, x.total])], [14, 10, 15, 15, 18]);
+      hoja('Ventas', [['Fecha', 'Pedido', 'Tipo', 'Mesa', 'Cliente', 'Base', 'INC', 'IVA', 'Domicilio', 'Total', 'Costo', 'Medios de pago', 'Documento electrónico'],
+        ...inf.ventas.map((v) => [v.fecha, v.numero, TIPO[v.tipo], v.mesa || '', v.cliente || '', v.base, v.inc, v.iva, Number(v.costo_envio), v.total, v.costo, v.medios || '', v.documento || ''])],
+        [17, 8, 12, 10, 22, 12, 10, 10, 10, 12, 10, 26, 18]);
+      hoja('Gastos', [['Fecha', 'Categoría', 'Proveedor', 'NIT', 'Empleado', 'Descripción', 'Valor', 'Medio de pago', 'De caja', 'Anulado', 'Motivo anulación'],
+        ...inf.gastos.map((g) => [g.fecha, cat(g.categoria), g.proveedor || '', g.nit || '', g.empleado || '', g.descripcion || '', Number(g.valor),
+          g.medio_pago, g.pagado_de_caja ? 'Sí' : 'No', g.anulado ? 'Sí' : 'No', g.motivo_anulacion || ''])],
+        [11, 18, 22, 14, 18, 30, 12, 14, 8, 8, 24]);
+      hoja('Compras insumos', [['Fecha', 'Proveedor', 'NIT', 'Insumo', 'Cantidad', 'Unidad', 'Costo total', 'Medio de pago', 'Anulado'],
+        ...inf.compras.map((c) => [c.fecha, c.proveedor || '', c.nit || '', c.insumo, Number(c.cantidad), c.unidad, Number(c.costo_total), c.medio_pago, c.anulado ? 'Sí' : 'No'])],
+        [11, 22, 14, 24, 10, 8, 12, 14, 8]);
+      hoja('Proveedores', [['Proveedor', 'NIT', 'Pagos', 'Valor total'], ...inf.proveedores.map((x) => [x.proveedor, x.nit || '', x.compras, x.valor])], [28, 16, 8, 14]);
+      hoja('Nómina', [['Empleado', 'Pagos', 'Valor total'], ...inf.nomina.map((x) => [x.empleado, x.pagos, x.valor])], [28, 8, 14]);
+      hoja('Documentos electrónicos', [['Fecha', 'Tipo', 'Número', 'Cliente', 'Documento cliente', 'Base', 'Impuestos', 'Total', 'Estado', 'Anulado', 'Ambiente', 'CUFE/CUDE'],
+        ...inf.documentos.map((d) => [d.fecha, d.tipo, d.numero, d.cliente || '', d.documento_cliente || '', Number(d.subtotal), Number(d.impuestos), Number(d.total),
+          d.estado, d.anulado ? 'Sí' : 'No', d.ambiente, d.cufe || ''])],
+        [17, 14, 12, 24, 16, 12, 12, 12, 10, 8, 10, 40]);
+      const nombre = (e.nombre_negocio || 'restaurante').replace(/[^\p{L}\p{N}]+/gu, '_');
+      X.writeFile(libro, `Contabilidad_${nombre}_${C.mes ? `${C.anio}-${C.mes}` : C.anio}.xlsx`);
+      toast('Excel descargado', 'ok');
+    },
+    pdf: () => {
+      const e = inf.empresa;
+      const fila = (cols, clase = '') => `<tr class="${clase}">${cols.map((c, i) => `<td class="${i ? 'n' : ''}">${c}</td>`).join('')}</tr>`;
+      imprimirHoja(`
+        <div class="cab"><div><h1>${esc(e.fe_razon_social || e.nombre_negocio || '')}</h1>
+          <div class="muted">${e.fe_nit ? `NIT ${esc(e.fe_nit)}${e.fe_dv ? '-' + esc(e.fe_dv) : ''} · ` : ''}${esc([e.direccion, e.ciudad].filter(Boolean).join(', '))}</div></div>
+          <div style="text-align:right"><b>Informe contable</b><br>${esc(periodo)}<br><span class="muted">${desde} a ${hasta}</span></div></div>
+        <h2>Estado de resultados</h2>
+        <table>${estado.map(([k, v, t]) => fila([k, pesos(v)], t ? 't' : '')).join('')}</table>
+        <div class="grid">
+          <div><h2>Impuestos por tarifa</h2><table><tr><th>Impuesto</th><th class="n">Base</th><th class="n">Impuesto</th></tr>
+            ${inf.impuestos.map((x) => fila([x.tipo === 'EXCLUIDO' || !x.tasa ? 'Excluido' : `${x.tipo} ${x.tasa}%`, pesos(x.base), pesos(x.impuesto)])).join('')}</table></div>
+          <div><h2>Medios de pago</h2><table>${inf.medios.map((m) => fila([MEDIO[m.medio] || m.medio, pesos(m.valor)])).join('')}</table></div>
+        </div>
+        <h2>Mes a mes</h2><table><tr><th>Mes</th><th class="n">Ventas</th><th class="n">Ingresos netos</th><th class="n">INC+IVA</th><th class="n">Costo</th><th class="n">Gastos</th><th class="n">Utilidad</th></tr>
+          ${inf.mensual.map((m) => fila([nombreMes(m.mes), m.pedidos, pesos(m.ingresos_netos), pesos(m.inc + m.iva), pesos(m.costo_ventas), pesos(m.gastos + m.mermas), pesos(m.utilidad)])).join('')}</table>
+        <div class="grid">
+          <div><h2>Gastos por categoría</h2><table>${inf.gastos_por_categoria.map((g) => fila([cat(g.categoria), pesos(g.valor)])).join('')}</table></div>
+          <div><h2>Compras por proveedor</h2><table><tr><th>Proveedor</th><th>NIT</th><th class="n">Valor</th></tr>
+            ${inf.proveedores.map((x) => `<tr><td>${esc(x.proveedor)}</td><td>${esc(x.nit || '—')}</td><td class="n">${pesos(x.valor)}</td></tr>`).join('')}</table></div>
+        </div>
+        <h2>Otros datos</h2><table>
+          ${fila(['Ventas registradas', R.pedidos])}${fila(['Compras de insumos (al inventario)', pesos(R.compras_insumos)])}
+          ${fila(['Nómina pagada', pesos(R.nomina)])}${fila(['Inventario valorizado a la fecha de generación', pesos(R.inventario_actual)])}
+          ${fila(['Documentos electrónicos vigentes', `${R.documentos_vigentes} · ${pesos(R.facturado_electronicamente)}`])}</table>
+        <p class="nota">Generado el ${fechaHora(new Date())} desde el sistema POS. Informe de apoyo para el contador, basado en las ventas cobradas, gastos y compras
+          registrados; no reemplaza la contabilidad formal. El detalle de cada venta, gasto y compra está en el archivo Excel.</p>`, `Informe ${periodo}`);
+    }
+  };
+}
+
 const VISTAS = {
   pedidos: vistaPedidos, pedido: vistaPedido, cocina: vistaCocina, domicilios: vistaDomicilios, caja: vistaCaja,
   inventario: vistaInventario, gastos: vistaGastos, menu: vistaMenu, reportes: vistaReportes, ajustes: vistaAjustes,
-  restaurantes: vistaRestaurantes, personal: vistaPersonal, facturas: vistaFacturas
+  restaurantes: vistaRestaurantes, personal: vistaPersonal, facturas: vistaFacturas, contabilidad: vistaContabilidad
 };
 
 iniciar();

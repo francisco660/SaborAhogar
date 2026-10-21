@@ -477,6 +477,9 @@ table.horarios .hoy { background: color-mix(in srgb, var(--amarillo) 10%, transp
 .ticket-previa { background: #e9e4e0; border-radius: 14px; padding: 1rem .5rem; max-height: 70vh; overflow: auto; text-align: center; }
 .ticket-previa iframe { background: #fff; border: 0; max-width: 100%; min-height: 200px; box-shadow: 0 6px 20px rgba(0,0,0,.18); }
 
+/* ─── Contabilidad ─── */
+tr.fila-total td { font-weight: 600; border-top: 2px solid rgba(30,23,22,0.8); }
+
 /* ─── Facturación electrónica ─── */
 .fe-resultados { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .4rem; }
 #datos-factura { margin-top: .4rem; }
