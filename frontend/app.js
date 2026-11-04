@@ -41,6 +41,52 @@ const almacen = {
   borrar(k) { try { localStorage.removeItem(k); } catch { /* nada */ } }
 };
 
+// ─── Campos de dinero con puntos de miles (10.000 · 1.000.000) ──────────────
+// Los <input data-dinero> se muestran con puntos mientras se escribe, pero su
+// .value devuelve solo los dígitos ("10000"), así el resto del código no cambia.
+const VALOR_NATIVO = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+const conPuntos = (v) => {
+  const d = String(v ?? '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+  return d ? Number(d).toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '';
+};
+function campoDinero(inp) {
+  if (inp.dataset.dineroListo) return;
+  inp.dataset.dineroListo = '1';
+  const inicial = VALOR_NATIVO.get.call(inp);
+  inp.type = 'text';
+  inp.inputMode = 'numeric';
+  inp.autocomplete = 'off';
+  ['min', 'max', 'step'].forEach((a) => inp.removeAttribute(a));
+  Object.defineProperty(inp, 'value', {
+    configurable: true,
+    get() { return VALOR_NATIVO.get.call(this).replace(/\D/g, ''); },
+    set(v) {
+      const n = Number(v);
+      VALOR_NATIVO.set.call(this, v === '' || v == null || !Number.isFinite(n) ? '' : conPuntos(Math.round(n)));
+    }
+  });
+  inp.value = inicial;
+  // Reformatea al escribir sin mover el cursor de su lugar entre los dígitos
+  inp.addEventListener('input', () => {
+    const texto = VALOR_NATIVO.get.call(inp);
+    const pos = inp.selectionStart ?? texto.length;
+    const digitosAntes = texto.slice(0, pos).replace(/\D/g, '').length;
+    const nuevo = conPuntos(texto);
+    VALOR_NATIVO.set.call(inp, nuevo);
+    let i = 0;
+    for (let n = 0; i < nuevo.length && n < digitosAntes; i++) if (/\d/.test(nuevo[i])) n++;
+    try { inp.setSelectionRange(i, i); } catch { /* sin cursor */ }
+  });
+}
+new MutationObserver(() => $$('input[data-dinero]:not([data-dinero-listo])').forEach(campoDinero))
+  .observe(document.body, { childList: true, subtree: true });
+// FormData lee el texto con puntos: se pasan a dígitos
+const datosForm = (f) => {
+  const d = Object.fromEntries(new FormData(f));
+  $$('input[data-dinero]', f).forEach((i) => { if (i.name) d[i.name] = i.value; });
+  return d;
+};
+
 // ─── Apariencia (tema por restaurante) ──────────────────────────────────────
 // Se guarda en los ajustes del restaurante (tema_*) y se recuerda en el equipo
 // para pintar el login con los colores del último restaurante usado.
@@ -919,7 +965,7 @@ async function pintarCuenta() {
         <div><label>Nombre</label><input data-campo="cliente.nombre" value="${esc(cl.nombre || '')}"></div>
         <div style="grid-column:1/-1"><label>Dirección *</label><input data-campo="cliente.direccion" value="${esc(cl.direccion || '')}"></div>
         <div><label>Barrio</label><input data-campo="cliente.barrio" value="${esc(cl.barrio || '')}"></div>
-        <div><label>Costo envío</label><input data-campo="costo_envio" type="number" min="0" step="500" value="${esc(n.costo_envio)}"></div>
+        <div><label>Costo envío</label><input data-dinero data-campo="costo_envio" type="number" min="0" step="500" value="${esc(n.costo_envio)}"></div>
       </div>`;
     }
     cabecera += `<div class="campo" style="margin-top:.6rem"><label>Nota del pedido</label><input data-campo="nota" value="${esc(n.nota || '')}"></div>`;
@@ -1036,7 +1082,7 @@ function modalCobro(p) {
       <div id="medios">
         <div class="fila" style="margin-bottom:.6rem">${MEDIOS_COBRO.map((m) => `<button type="button" class="peq" data-acc="todo" data-m="${m}">Todo ${MEDIO[m]}</button>`).join('')}</div>
         ${MEDIOS_COBRO.map((m) => `<div class="entre" style="margin-bottom:.4rem"><label style="margin:0;width:120px">${m === 'FIADO' ? '📒 ' : ''}${MEDIO[m]}</label>
-          <input class="crece" name="${m}" type="number" min="0" step="100" inputmode="numeric" value="${m === 'EFECTIVO' ? p.total : ''}" style="max-width:180px"></div>`).join('')}
+          <input data-dinero class="crece" name="${m}" type="number" min="0" step="100" inputmode="numeric" value="${m === 'EFECTIVO' ? p.total : ''}" style="max-width:180px"></div>`).join('')}
         <div id="fiado" class="fiado-caja" hidden>
           <div class="etiqueta-seccion">¿A quién se le fía?</div>
           <div id="fiado-elegido"></div>
@@ -1051,7 +1097,7 @@ function modalCobro(p) {
           </div>
         </div>
         <div class="campos" style="margin-top:.6rem">
-          <div><label>Efectivo recibido</label><input name="recibido" type="number" min="0" step="100" inputmode="numeric" autofocus></div>
+          <div><label>Efectivo recibido</label><input data-dinero name="recibido" type="number" min="0" step="100" inputmode="numeric" autofocus></div>
           <div><label>Cambio</label><div id="cambio" class="kpi" style="padding:.4rem .7rem"><span class="v" style="font-size:1.1rem">—</span></div></div>
         </div>
         <p id="restante" class="chico"></p>
@@ -1255,7 +1301,7 @@ async function vistaCaja(el) {
       <form class="tarjeta" data-submit="abrir" style="max-width:420px">
         <h3>Abrir turno de caja</h3>
         <p class="suave chico">Cuente el efectivo con el que empieza el día (la base).</p>
-        <div class="campo"><label>Base inicial</label><input name="base" type="number" min="0" step="1000" required inputmode="numeric" autofocus></div>
+        <div class="campo"><label>Base inicial</label><input data-dinero name="base" type="number" min="0" step="1000" required inputmode="numeric" autofocus></div>
         <button class="primario">Abrir caja</button>
       </form>` : `
       <div class="kpis">
@@ -1280,7 +1326,7 @@ async function vistaCaja(el) {
           <form data-submit="cerrar" class="seccion">
             <h3>Cerrar caja</h3>
             <div class="campos">
-              <div><label>Efectivo contado</label><input name="contado" type="number" min="0" step="100" required inputmode="numeric"></div>
+              <div><label>Efectivo contado</label><input data-dinero name="contado" type="number" min="0" step="100" required inputmode="numeric"></div>
               <div><label>Diferencia</label><div class="kpi" style="padding:.4rem .7rem"><span class="v" id="dif" style="font-size:1.1rem">—</span></div></div>
             </div>
             <div class="campo" style="margin-top:.6rem"><label>Observaciones</label><input name="nota"></div>
@@ -1338,7 +1384,7 @@ async function vistaCaja(el) {
       vistaCaja(el);
     },
     retiro: () => abrirModal(`${cabeceraModal('Retiro de caja')}
-      <form><div class="campo"><label>Valor</label><input name="valor" type="number" min="1" step="1" inputmode="numeric" required autofocus></div>
+      <form><div class="campo"><label>Valor</label><input data-dinero name="valor" type="number" min="1" step="1" inputmode="numeric" required autofocus></div>
       <div class="campo"><label>Motivo</label><input name="motivo" required placeholder="Ej: consignación, pago al dueño"></div>
       <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Registrar</button></div></form>`, {
       submit: async (f, _m, cerrar) => {
@@ -1513,7 +1559,7 @@ async function modalGasto(listo) {
   const linea = () => `<div class="fila linea-compra" style="margin-bottom:.4rem">
     <select name="insumo" class="crece" style="min-width:160px"><option value="">Insumo…</option>${opcInsumos}</select>
     <input name="cantidad" type="number" min="0" step="any" placeholder="Cantidad" style="width:110px">
-    <input name="costo" type="number" min="0" step="100" placeholder="Valor total $" style="width:130px">
+    <input data-dinero name="costo" type="number" min="0" step="100" placeholder="Valor total $" style="width:130px">
     <button type="button" class="peq icono peligro" data-acc="quitar" aria-label="Quitar">✕</button></div>`;
   abrirModal(`${cabeceraModal('Registrar gasto')}
     <form>
@@ -1532,7 +1578,7 @@ async function modalGasto(listo) {
         <div id="lineas">${linea()}${linea()}</div>
         <button type="button" class="peq" data-acc="linea">+ Otra línea</button>
       </div>
-      <div id="simple" hidden class="campo" style="margin-top:.6rem"><label>Valor</label><input name="valor" type="number" min="1" step="1" inputmode="numeric"></div>
+      <div id="simple" hidden class="campo" style="margin-top:.6rem"><label>Valor</label><input data-dinero name="valor" type="number" min="1" step="1" inputmode="numeric"></div>
       <div class="campos" style="margin-top:.6rem">
         <div><label>Medio de pago</label><select name="medio">${['EFECTIVO', 'NEQUI', 'DAVIPLATA', 'TARJETA', 'TRANSFERENCIA', 'CREDITO'].map((m) => `<option value="${m}">${MEDIO[m]}</option>`).join('')}</select></div>
         <label class="check" style="align-self:flex-end"><input type="checkbox" name="caja"> Pagado con efectivo de la caja</label>
@@ -1596,7 +1642,7 @@ async function vistaMenu(el) {
       <form class="campos" data-submit="guardarDia" data-id="${p.id}">
         <div style="grid-column: 1 / -1"><label>Descripción (sopa, acompañantes…)</label>
           <input name="descripcion" value="${esc(p.descripcion || '')}"></div>
-        <div><label>Precio</label><input name="precio" type="number" min="0" step="100" value="${p.precio}" required></div>
+        <div><label>Precio</label><input data-dinero name="precio" type="number" min="0" step="100" value="${p.precio}" required></div>
         <button style="align-self:end">Guardar</button>
       </form>
       ${p.grupos.map((g) => `
@@ -1753,7 +1799,7 @@ function modalProducto(p, categoriaId) {
           <div style="grid-column: 1 / -1"><label>Nombre *</label><input name="nombre" value="${esc(prod?.nombre || '')}" required ${prod ? '' : 'autofocus'}></div>
           <div><label>Categoría *</label><select name="categoria_id">${cats.map((c) =>
             `<option value="${c.id}" ${c.id === (prod?.categoria_id ?? categoriaId) ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}</select></div>
-          <div><label>Precio *</label><input name="precio" type="number" min="0" step="100" value="${prod?.precio ?? ''}" required></div>
+          <div><label>Precio *</label><input data-dinero name="precio" type="number" min="0" step="100" value="${prod?.precio ?? ''}" required></div>
           <div><label>Orden</label><input name="orden" type="number" min="0" value="${prod?.orden ?? ''}" placeholder="Al final"></div>
           <div><label>Impuesto (incluido en el precio)</label><select name="impuesto">${IMPUESTOS.map(([k, t]) =>
             `<option value="${k}" ${k === `${prod?.impuesto_tipo ?? 'INC'}|${Number(prod?.impuesto_tasa ?? 8)}` ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
@@ -1779,14 +1825,14 @@ function modalProducto(p, categoriaId) {
         ${g.opciones.map((o) => `
           <form class="opcion-fila ${o.activo ? '' : 'inactiva'}" data-form="opcion" data-id="${o.id}">
             <input name="nombre" value="${esc(o.nombre)}" aria-label="Opción" class="crece">
-            <label class="mini">+ $<input name="precio_extra" type="number" min="0" step="100" value="${o.precio_extra}"></label>
+            <label class="mini">+ $<input data-dinero name="precio_extra" type="number" min="0" step="100" value="${o.precio_extra}"></label>
             <label class="check mini-check" title="Disponible"><input type="checkbox" name="activo" ${o.activo ? 'checked' : ''}> Disp.</label>
             <button type="button" class="peq icono" data-acc="recetaOpcion" data-id="${o.id}" data-nombre="${esc(o.nombre)}" title="Receta de esta opción" aria-label="Receta">🧾</button>
             <button class="peq">Guardar</button>
           </form>`).join('')}
         <form class="opcion-fila nueva" data-form="nuevaOpcion" data-id="${g.id}">
           <input name="nombre" placeholder="Nueva opción, ej: Pechuga" class="crece">
-          <label class="mini">+ $<input name="precio_extra" type="number" min="0" step="100" value="0"></label>
+          <label class="mini">+ $<input data-dinero name="precio_extra" type="number" min="0" step="100" value="0"></label>
           <button class="peq primario">+ Agregar</button>
         </form>
       </div>`).join('');
@@ -2029,7 +2075,7 @@ async function vistaAjustes(el) {
           <div class="campos">
             <div><label>Nombre</label><input name="nombre" required></div>
             <div><label>Cargo</label><input name="cargo"></div>
-            <div><label>Salario</label><input name="salario" type="number" min="0" step="1000" required></div>
+            <div><label>Salario</label><input data-dinero name="salario" type="number" min="0" step="1000" required></div>
           </div>
           <button class="primario" style="margin-top:.6rem">Guardar empleado</button>
         </form>
@@ -2072,7 +2118,7 @@ async function vistaAjustes(el) {
           <div><label>Teléfono</label><input name="telefono" value="${esc(aj.telefono || '')}"></div>
           <div><label>Dirección</label><input name="direccion" value="${esc(aj.direccion || '')}"></div>
           <div><label>Ciudad (para el mapa de domicilios)</label><input name="ciudad" value="${esc(aj.ciudad || '')}" placeholder="Ej: Bello, Antioquia"></div>
-          <div><label>Costo de domicilio por defecto</label><input name="costo_envio" type="number" min="0" step="500" value="${esc(aj.costo_envio || 0)}"></div>
+          <div><label>Costo de domicilio por defecto</label><input data-dinero name="costo_envio" type="number" min="0" step="500" value="${esc(aj.costo_envio || 0)}"></div>
         </div>
         <div class="campo" style="margin-top:.6rem"><label>Mensaje al pie del ticket</label><input name="pie_ticket" value="${esc(aj.pie_ticket || '')}"></div>
         <div class="campos" style="margin-top:.6rem">
@@ -2110,7 +2156,7 @@ async function vistaAjustes(el) {
       <div class="campos">
         <div><label>Nombre</label><input name="nombre" required value="${esc(e?.nombre || '')}" autofocus></div>
         <div><label>Cargo</label><input name="cargo" value="${esc(e?.cargo || '')}"></div>
-        <div><label>Salario</label><input name="salario" type="number" min="0" step="1000" required value="${esc(e?.salario ?? '')}"></div>
+        <div><label>Salario</label><input data-dinero name="salario" type="number" min="0" step="1000" required value="${esc(e?.salario ?? '')}"></div>
       </div>
       <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar</button></div>
     </form>`, {
@@ -2178,7 +2224,7 @@ async function vistaAjustes(el) {
       aplicarTema({ primario: f.tema_primario.value, acento: f.tema_acento.value, barra: f.tema_barra.value, barra2: f.tema_barra2.value });
     },
     apariencia: async (f) => {
-      const body = Object.fromEntries(new FormData(f));
+      const body = datosForm(f);
       await api('/ajustes', { method: 'PUT', body });
       S.ajustes = await api('/ajustes');
       aplicarTema(temaDe(S.ajustes));
@@ -2187,7 +2233,7 @@ async function vistaAjustes(el) {
       toast('Apariencia guardada', 'ok');
     },
     negocio: async (f) => {
-      const body = Object.fromEntries(new FormData(f));
+      const body = datosForm(f);
       await api('/ajustes', { method: 'PUT', body });
       S.ajustes = await api('/ajustes');
       pintarMarca();
@@ -3248,7 +3294,7 @@ async function vistaFiadoCliente(el, id) {
       <form>
         <div class="campo"><label>Nombre</label><input name="nombre" required value="${esc(c.nombre || '')}" autofocus></div>
         <div class="campo"><label>Cupo máximo de fiado</label>
-          <input name="cupo" type="number" min="0" step="1000" inputmode="numeric" value="${c.cupo_fiado ?? ''}" placeholder="Vacío = sin límite">
+          <input data-dinero name="cupo" type="number" min="0" step="1000" inputmode="numeric" value="${c.cupo_fiado ?? ''}" placeholder="Vacío = sin límite">
           <p class="chico suave">Si el cliente llega a este valor, el sistema no deja fiarle más hasta que abone.</p></div>
         <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar</button></div>
       </form>`, {
@@ -3266,7 +3312,7 @@ function modalAbono(c, listo) {
     <form>
       <div class="total" style="border-top:0;margin-top:0"><span>Debe</span><span>${pesos(c.saldo)}</span></div>
       <div class="campos">
-        <div><label>Valor del abono</label><input name="valor" type="number" min="1" max="${Number(c.saldo)}" step="1" inputmode="numeric" required autofocus value="${Number(c.saldo)}"></div>
+        <div><label>Valor del abono</label><input data-dinero name="valor" type="number" min="1" max="${Number(c.saldo)}" step="1" inputmode="numeric" required autofocus value="${Number(c.saldo)}"></div>
         <div><label>Medio de pago</label><select name="medio">${MEDIOS.map((m) => `<option value="${m}">${MEDIO[m]}</option>`).join('')}</select></div>
       </div>
       <div class="campo" style="margin-top:.6rem"><label>Nota (opcional)</label><input name="nota"></div>
