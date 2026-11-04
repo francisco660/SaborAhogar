@@ -28,7 +28,8 @@
 export const DIAN = {
   tipoDocumento: { CC: '13', NIT: '31', CE: '22', PP: '41', TI: '12', NIT_EXT: '42', PEP: '47' },
   impuesto: { IVA: '01', INC: '04' },
-  medioPago: { EFECTIVO: '10', TARJETA: '48', TRANSFERENCIA: '42', NEQUI: '42', DAVIPLATA: '42' }
+  medioPago: { EFECTIVO: '10', TARJETA: '48', TRANSFERENCIA: '42', NEQUI: '42', DAVIPLATA: '42', FIADO: 'ZZZ' },
+  formaPago: { CONTADO: '1', CREDITO: '2' }   // fiado = crédito
 };
 
 export default {
@@ -90,6 +91,7 @@ function aFormatoProveedor(datos) {
       tax: i.impuesto.tipo === 'EXCLUIDO' ? null : { code: DIAN.impuesto[i.impuesto.tipo], rate: i.impuesto.tasa }
     })),
     payment_method: DIAN.medioPago[datos.pagos[0]?.medio] || '10',
+    payment_form: datos.pagos.some((p) => p.medio === 'FIADO') ? DIAN.formaPago.CREDITO : DIAN.formaPago.CONTADO,
     reference: datos.referencia,
     reason: datos.motivo
   };

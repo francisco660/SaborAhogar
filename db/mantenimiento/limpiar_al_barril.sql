@@ -5,7 +5,7 @@
 --
 --  BORRA: pedidos, ítems, pagos, caja (turnos y retiros), gastos, movimientos
 --         de inventario (el stock queda en 0), documentos electrónicos de
---         prueba, clientes para factura de prueba, clientes de domicilio de prueba
+--         prueba, abonos de fiados, clientes para factura de prueba, clientes de domicilio de prueba
 --         y entradas/salidas de prueba del personal.
 --  CONSERVA: usuarios, personal (empleados y horarios programados),
 --         menú (productos, opciones, recetas), insumos, mesas, proveedores,
@@ -62,6 +62,12 @@ BEGIN
     EXECUTE 'DELETE FROM asistencia WHERE restaurante_id = $1' USING v_rest;
   END IF;
 
+  -- Existe solo si se corrió el script 11 (fiados)
+  IF to_regclass('pos.abono_cliente') IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE abono_cliente DISABLE TRIGGER USER';
+    EXECUTE 'DELETE FROM abono_cliente WHERE restaurante_id = $1' USING v_rest;
+    EXECUTE 'ALTER TABLE abono_cliente ENABLE TRIGGER USER';
+  END IF;
   DELETE FROM pago                  WHERE restaurante_id = v_rest;
   DELETE FROM movimiento_inventario WHERE restaurante_id = v_rest;
   DELETE FROM pedido_item_opcion    WHERE restaurante_id = v_rest;

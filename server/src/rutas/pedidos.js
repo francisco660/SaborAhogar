@@ -7,7 +7,7 @@ import { ah, ErrorApp } from '../util.js';
 import { crearDocumento, leerConfig } from '../facturacion/documentos.js';
 
 const r = Router();
-const MEDIOS = ['EFECTIVO', 'NEQUI', 'DAVIPLATA', 'TARJETA', 'TRANSFERENCIA'];
+const MEDIOS = ['EFECTIVO', 'NEQUI', 'DAVIPLATA', 'TARJETA', 'TRANSFERENCIA', 'FIADO'];
 
 // Consulta base de pedidos con ítems, opciones, total y pagos
 const SQL_PEDIDOS = `
@@ -15,8 +15,9 @@ const SQL_PEDIDOS = `
          me.nombre AS mesero, d.nombre AS domiciliario,
          total_pedido(p.id) AS total,
          (SELECT coalesce(sum(valor),0) FROM pago WHERE pedido_id = p.id) AS pagado,
-         (SELECT coalesce(jsonb_agg(jsonb_build_object('medio', medio, 'valor', valor,
-                   'por_liquidar', turno_id IS NULL) ORDER BY id), '[]') FROM pago WHERE pedido_id = p.id) AS pagos,
+         (SELECT coalesce(jsonb_agg(jsonb_build_object('medio', pg.medio, 'valor', pg.valor,
+                   'por_liquidar', pg.turno_id IS NULL, 'cliente', cf.nombre, 'telefono_cliente', cf.telefono) ORDER BY pg.id), '[]')
+            FROM pago pg LEFT JOIN cliente cf ON cf.id = pg.cliente_id WHERE pg.pedido_id = p.id) AS pagos,
          coalesce((SELECT jsonb_agg(jsonb_build_object(
              'id', i.id, 'producto_id', i.producto_id, 'nombre', i.nombre, 'cantidad', i.cantidad,
              'precio_unit', i.precio_unit, 'nota', i.nota, 'estado', i.estado,
@@ -274,11 +275,25 @@ r.post('/pedidos/:id/anular', permite('cajero'), ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// Cobrar: { pagos: [{medio, valor}], por_liquidar: bool }
+// El cliente debe existir y, si tiene cupo, no pasarse de él
+async function validarFiado(c, clienteId, valor) {
+  if (!clienteId) throw new ErrorApp('Elija el cliente al que se le fía');
+  const { rows: [cl] } = await c.query(
+    `SELECT id, nombre, cupo_fiado, saldo_cliente(id) AS saldo FROM cliente WHERE id = $1 FOR UPDATE`, [clienteId]);
+  if (!cl) throw new ErrorApp('Cliente no encontrado');
+  if (cl.cupo_fiado != null && Number(cl.saldo) + valor > Number(cl.cupo_fiado)) {
+    throw new ErrorApp(`${cl.nombre || 'El cliente'} ya debe ${Number(cl.saldo).toLocaleString('es-CO')} y su cupo es ` +
+      `${Number(cl.cupo_fiado).toLocaleString('es-CO')}. No se le puede fiar ${valor.toLocaleString('es-CO')}.`);
+  }
+  return cl.id;
+}
+
+// Cobrar: { pagos: [{medio, valor}], por_liquidar: bool, fiado_cliente_id }
 // por_liquidar = el domiciliario recibe el efectivo y lo entrega después en caja
+// FIADO = el valor queda como deuda del cliente fiado_cliente_id (cuentas por cobrar)
 r.post('/pedidos/:id/cobrar', permite('cajero'), ah(async (req, res) => {
   const id = Number(req.params.id);
-  const { pagos = [], por_liquidar = false, factura = null } = req.body;
+  const { pagos = [], por_liquidar = false, factura = null, fiado_cliente_id = null } = req.body;
   let avisoFe = null;
   await tx(async (c) => {
     const { rows: [p] } = await c.query(`SELECT * FROM pedido WHERE id = $1 FOR UPDATE`, [id]);
@@ -294,11 +309,13 @@ r.post('/pedidos/:id/cobrar', permite('cajero'), ah(async (req, res) => {
     } else {
       if (!turno) throw new ErrorApp('No hay caja abierta. Abra el turno de caja para cobrar.');
       if (!pagos.length) throw new ErrorApp('Registre al menos un pago');
+      const fiado = pagos.filter((pg) => pg.medio === 'FIADO').reduce((s, pg) => s + Math.round(Number(pg.valor) || 0), 0);
+      const clienteFiado = fiado ? await validarFiado(c, fiado_cliente_id, fiado) : null;
       for (const pg of pagos) {
         if (!MEDIOS.includes(pg.medio) || !(Number(pg.valor) > 0)) throw new ErrorApp('Pago inválido');
         await c.query(
-          `INSERT INTO pago (pedido_id, medio, valor, turno_id, registrado_por) VALUES ($1, $2, $3, $4, $5)`,
-          [id, pg.medio, Math.round(Number(pg.valor)), turno.id, req.usuario.id]);
+          `INSERT INTO pago (pedido_id, medio, valor, turno_id, registrado_por, cliente_id) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [id, pg.medio, Math.round(Number(pg.valor)), turno.id, req.usuario.id, pg.medio === 'FIADO' ? clienteFiado : null]);
       }
     }
     await c.query(`UPDATE pedido SET estado = 'pagado' WHERE id = $1`, [id]);

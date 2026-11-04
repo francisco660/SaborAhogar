@@ -7,7 +7,7 @@
 --
 --  BORRA (solo de ese restaurante): pedidos, ítems, pagos, turnos y retiros de
 --          caja, gastos, movimientos de inventario (el stock queda en 0) y
---          documentos electrónicos de prueba.
+--          documentos electrónicos y abonos de fiados de prueba.
 --  ¡No lo use después de emitir facturas reales a la DIAN!
 --  CONSERVA: usuarios, menú (categorías, productos, opciones, recetas),
 --          insumos, mesas, empleados, proveedores, clientes y ajustes.
@@ -43,6 +43,12 @@ BEGIN
   -- Documentos electrónicos de prueba (si existe la tabla de facturación)
   IF to_regclass('pos.documento_electronico') IS NOT NULL THEN
     EXECUTE 'DELETE FROM documento_electronico WHERE restaurante_id = $1' USING v_rest;
+  END IF;
+  -- Existe solo si se corrió el script 11 (fiados)
+  IF to_regclass('pos.abono_cliente') IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE abono_cliente DISABLE TRIGGER USER';
+    EXECUTE 'DELETE FROM abono_cliente WHERE restaurante_id = $1' USING v_rest;
+    EXECUTE 'ALTER TABLE abono_cliente ENABLE TRIGGER USER';
   END IF;
   DELETE FROM pago                  WHERE restaurante_id = v_rest;
   DELETE FROM movimiento_inventario WHERE restaurante_id = v_rest;

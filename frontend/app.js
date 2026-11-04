@@ -24,7 +24,8 @@ const ROL = { admin: 'Administrador', cajero: 'Caja', mesero: 'Mesero', cocina: 
 const ESTADO_ITEM = { pendiente: 'Sin enviar', en_cocina: 'En cocina', preparando: 'En preparación', listo: 'Listo', entregado: 'Entregado', anulado: 'Anulado' };
 const TIPO = { MESA: 'Mesa', LLEVAR: 'Para llevar', DOMICILIO: 'Domicilio' };
 const MEDIOS = ['EFECTIVO', 'NEQUI', 'DAVIPLATA', 'TARJETA', 'TRANSFERENCIA'];
-const MEDIO = { EFECTIVO: 'Efectivo', NEQUI: 'Nequi', DAVIPLATA: 'Daviplata', TARJETA: 'Tarjeta', TRANSFERENCIA: 'Transferencia', CREDITO: 'Crédito' };
+const MEDIOS_COBRO = [...MEDIOS, 'FIADO'];
+const MEDIO = { EFECTIVO: 'Efectivo', NEQUI: 'Nequi', DAVIPLATA: 'Daviplata', TARJETA: 'Tarjeta', TRANSFERENCIA: 'Transferencia', CREDITO: 'Crédito', FIADO: 'Fiado' };
 const CATEGORIAS_GASTO = {
   COMPRA_INSUMOS: 'Compra de insumos', ARRIENDO: 'Arriendo', SERVICIOS: 'Servicios públicos', NOMINA: 'Nómina',
   GAS: 'Gas', MANTENIMIENTO: 'Mantenimiento', DOMICILIOS: 'Domicilios', OTROS: 'Otros'
@@ -351,9 +352,11 @@ function ticketPedido(p, tipo = 'cuenta') {
         <tr><td class="b">Total con propina</td><td class="r b">${pesos(Math.round(p.total * (1 + propina / 100)))}</td></tr></table>
       <div class="aviso">La propina es voluntaria: usted puede aceptarla, modificar su valor o rechazarla. Infórmelo a quien lo atiende.</div>` : ''}
     ${p.pagos.length ? `<hr><table>
-      ${p.pagos.map((pg) => `<tr><td>${MEDIO[pg.medio]}${pg.por_liquidar ? ' (contra entrega)' : ''}</td><td class="r">${pesos(pg.valor)}</td></tr>`).join('')}
+      ${p.pagos.map((pg) => `<tr><td>${MEDIO[pg.medio]}${pg.por_liquidar ? ' (contra entrega)' : ''}${pg.medio === 'FIADO' && pg.cliente ? ` a ${esc(pg.cliente)}` : ''}</td><td class="r">${pesos(pg.valor)}</td></tr>`).join('')}
       ${!pagado && pagos < p.total ? `<tr><td class="b">Pendiente</td><td class="r b">${pesos(p.total - pagos)}</td></tr>` : ''}
     </table>` : ''}
+    ${p.pagos.some((pg) => pg.medio === 'FIADO') ? `<div class="aviso">Venta a crédito (fiado). Debo y pagaré el valor fiado.<br><br>
+      Firma: ______________________</div>` : ''}
     ${doc ? `<hr><p class="chico"><b>${esc(TIPO_DOC[doc.tipo])} ${esc(numDoc(doc))}</b></p>
       ${doc.cufe ? `<p class="cufe">${doc.tipo === 'FACTURA' ? 'CUFE' : 'CUDE'}: ${esc(doc.cufe)}</p>` : ''}` : ''}
     ${p.nota ? `<hr><p class="chico"><b>Nota:</b> ${esc(p.nota)}</p>` : ''}
@@ -384,6 +387,7 @@ const NAV = [
   ['domicilios', 'Domicilios', ['cajero', 'domiciliario']],
   ['caja', 'Caja', ['cajero']],
   ['facturas', 'Facturas', ['cajero']],
+  ['fiados', 'Fiados', ['cajero']],
   ['inventario', 'Inventario', ['cajero']],
   ['gastos', 'Gastos', ['cajero']],
   ['menu', 'Menú', []],
@@ -393,7 +397,7 @@ const NAV = [
   ['ajustes', 'Ajustes', []],
   ['restaurantes', 'Restaurantes', 'superadmin']
 ];
-const ICONO_NAV = { pedidos: '🧾', cocina: '🍳', domicilios: '🛵', caja: '💵', facturas: '📄', inventario: '📦', gastos: '💸',
+const ICONO_NAV = { pedidos: '🧾', cocina: '🍳', domicilios: '🛵', caja: '💵', facturas: '📄', fiados: '📒', inventario: '📦', gastos: '💸',
   menu: '📋', reportes: '📊', contabilidad: '📚', personal: '👥', ajustes: '⚙️', restaurantes: '🏪' };
 // Vistas por rol; "superadmin" es solo para quien administra todos los restaurantes
 const puedeVer = (roles) => (roles === 'superadmin' ? !!S.usuario?.superadmin : tiene(...roles));
@@ -1021,6 +1025,8 @@ async function enviarPedido() {
 
 function modalCobro(p) {
   const puedeLiquidar = p.tipo === 'DOMICILIO' && p.domiciliario_id;
+  // Cliente al que se le fía (por defecto, el del domicilio)
+  let fiadoA = p.cliente_id ? { id: p.cliente_id, nombre: p.cliente, telefono: p.telefono } : null;
   const modal = abrirModal(`
     ${cabeceraModal(`Cobrar pedido #${p.numero}`)}
     <form>
@@ -1028,9 +1034,22 @@ function modalCobro(p) {
       ${puedeLiquidar ? `<label class="check" style="margin-bottom:.6rem"><input type="checkbox" name="liquidar">
         El domiciliario cobra en efectivo y lo entrega después en caja</label>` : ''}
       <div id="medios">
-        <div class="fila" style="margin-bottom:.6rem">${MEDIOS.map((m) => `<button type="button" class="peq" data-acc="todo" data-m="${m}">Todo ${MEDIO[m]}</button>`).join('')}</div>
-        ${MEDIOS.map((m) => `<div class="entre" style="margin-bottom:.4rem"><label style="margin:0;width:120px">${MEDIO[m]}</label>
+        <div class="fila" style="margin-bottom:.6rem">${MEDIOS_COBRO.map((m) => `<button type="button" class="peq" data-acc="todo" data-m="${m}">Todo ${MEDIO[m]}</button>`).join('')}</div>
+        ${MEDIOS_COBRO.map((m) => `<div class="entre" style="margin-bottom:.4rem"><label style="margin:0;width:120px">${m === 'FIADO' ? '📒 ' : ''}${MEDIO[m]}</label>
           <input class="crece" name="${m}" type="number" min="0" step="100" inputmode="numeric" value="${m === 'EFECTIVO' ? p.total : ''}" style="max-width:180px"></div>`).join('')}
+        <div id="fiado" class="fiado-caja" hidden>
+          <div class="etiqueta-seccion">¿A quién se le fía?</div>
+          <div id="fiado-elegido"></div>
+          <div id="fiado-buscar">
+            <input name="fiado_q" placeholder="Buscar por nombre o teléfono" autocomplete="off">
+            <div id="fiado-res" class="fiado-res"></div>
+            <div class="campos" style="margin-top:.4rem">
+              <div><label>Nombre (cliente nuevo)</label><input name="fiado_nombre"></div>
+              <div><label>Teléfono</label><input name="fiado_tel" inputmode="tel"></div>
+            </div>
+            <button type="button" class="peq" data-acc="fiadoNuevo" style="margin-top:.4rem">+ Crear cliente</button>
+          </div>
+        </div>
         <div class="campos" style="margin-top:.6rem">
           <div><label>Efectivo recibido</label><input name="recibido" type="number" min="0" step="100" inputmode="numeric" autofocus></div>
           <div><label>Cambio</label><div id="cambio" class="kpi" style="padding:.4rem .7rem"><span class="v" style="font-size:1.1rem">—</span></div></div>
@@ -1042,15 +1061,30 @@ function modalCobro(p) {
     </form>`, {
     feElegir: (b) => fe.elegir(b),
     todo: (b, m) => {
-      MEDIOS.forEach((x) => { m.querySelector(`[name=${x}]`).value = x === b.dataset.m ? p.total : ''; });
+      MEDIOS_COBRO.forEach((x) => { m.querySelector(`[name=${x}]`).value = x === b.dataset.m ? p.total : ''; });
       recalcular(m);
     },
-    input: (e, m) => { recalcular(m); fe?.alCambiar(e); },
-    change: (e, m) => { recalcular(m); fe?.alCambiar(e); },
+    fiadoElegir: (b, m) => { fiadoA = JSON.parse(b.dataset.cliente); pintarFiado(m); recalcular(m); },
+    fiadoCambiar: (_b, m) => { fiadoA = null; pintarFiado(m); recalcular(m); },
+    fiadoNuevo: async (_b, m) => {
+      fiadoA = await api('/cartera/clientes', { method: 'POST', body: {
+        nombre: m.querySelector('[name=fiado_nombre]').value, telefono: m.querySelector('[name=fiado_tel]').value } });
+      pintarFiado(m); recalcular(m);
+    },
+    input: (e, m) => {
+      if (e.target.name === 'fiado_q') return buscarFiado(e.target.value, m);
+      if (e.target.name?.startsWith('fiado_')) return;
+      recalcular(m); fe?.alCambiar(e);
+    },
+    change: (e, m) => { if (e.target.name?.startsWith('fiado_')) return; recalcular(m); fe?.alCambiar(e); },
     submit: async (f, _m, cerrar) => {
       let body;
       if (f.liquidar?.checked) body = { por_liquidar: true };
-      else body = { pagos: MEDIOS.map((x) => ({ medio: x, valor: Number(f[x].value) || 0 })).filter((x) => x.valor > 0) };
+      else body = { pagos: MEDIOS_COBRO.map((x) => ({ medio: x, valor: Number(f[x].value) || 0 })).filter((x) => x.valor > 0) };
+      if (body.pagos?.some((x) => x.medio === 'FIADO')) {
+        if (!fiadoA) throw new Error('Elija o cree el cliente al que se le fía');
+        body.fiado_cliente_id = fiadoA.id;
+      }
       if (fe?.pidio()) body.factura = { cliente_fiscal_id: await fe.guardar() };
       const r = await api(`/pedidos/${p.id}/cobrar`, { method: 'POST', body });
       cerrar();
@@ -1065,12 +1099,33 @@ function modalCobro(p) {
     }
   });
   const fe = feActiva() ? controlFactura(modal.m) : null;
+  pintarFiado(modal.m);
   recalcular(modal.m);
+
+  let buscarT;
+  function buscarFiado(q, m) {
+    clearTimeout(buscarT);
+    buscarT = setTimeout(() => ejecutar(async () => {
+      const r = q.trim().length >= 2 ? await api(`/cartera/clientes?q=${encodeURIComponent(q.trim())}`) : [];
+      $('#fiado-res', m).innerHTML = r.map((c) => `<button type="button" class="peq" data-acc="fiadoElegir" data-cliente="${esc(JSON.stringify(c))}">
+        ${esc(c.nombre || 'Sin nombre')} · ${esc(c.telefono)}${Number(c.saldo) ? ` · debe ${pesos(c.saldo)}` : ''}</button>`).join('')
+        || (q.trim().length >= 2 ? '<span class="chico suave">No se encontró. Créelo abajo.</span>' : '');
+    }), 300);
+  }
+  function pintarFiado(m) {
+    $('#fiado-elegido', m).innerHTML = fiadoA ? `<div class="entre fiado-cliente">
+      <span>👤 <b>${esc(fiadoA.nombre || 'Sin nombre')}</b> · ${esc(fiadoA.telefono || '')}
+        ${fiadoA.saldo != null ? `<br><span class="chico">Debe ${pesos(fiadoA.saldo)}${fiadoA.cupo_fiado != null ? ` · cupo ${pesos(fiadoA.cupo_fiado)}` : ''}</span>` : ''}</span>
+      <button type="button" class="peq" data-acc="fiadoCambiar">Cambiar</button></div>` : '';
+    $('#fiado-buscar', m).hidden = !!fiadoA;
+  }
   function recalcular(m) {
     const liquidar = m.querySelector('[name=liquidar]')?.checked;
     $('#medios', m).style.opacity = liquidar ? '.4' : '1';
     $$('#medios input', m).forEach((i) => { i.disabled = !!liquidar; });
-    const suma = MEDIOS.reduce((s, x) => s + (Number(m.querySelector(`[name=${x}]`).value) || 0), 0);
+    const suma = MEDIOS_COBRO.reduce((s, x) => s + (Number(m.querySelector(`[name=${x}]`).value) || 0), 0);
+    const fiado = !liquidar && Number(m.querySelector('[name=FIADO]').value) > 0;
+    $('#fiado', m).hidden = !fiado;
     const ef = Number(m.querySelector('[name=EFECTIVO]').value) || 0;
     const rec = Number(m.querySelector('[name=recibido]').value) || 0;
     $('#cambio .v', m).textContent = rec ? pesos(rec - ef) : '—';
@@ -1078,7 +1133,7 @@ function modalCobro(p) {
     const dif = p.total - suma;
     $('#restante', m).innerHTML = liquidar ? '' : dif === 0 ? '<span class="positivo">✔ Pagos completos</span>'
       : `<span class="negativo">${dif > 0 ? 'Faltan' : 'Sobran'} ${pesos(Math.abs(dif))}</span>`;
-    $('#btn-cobrar', m).disabled = !liquidar && dif !== 0;
+    $('#btn-cobrar', m).disabled = !liquidar && (dif !== 0 || (fiado && !fiadoA));
   }
 }
 
@@ -1206,7 +1261,9 @@ async function vistaCaja(el) {
       <div class="kpis">
         <div class="kpi destacado"><div class="t">Efectivo que debe haber</div><div class="v">${pesos(c.efectivo_esperado)}</div></div>
         <div class="kpi"><div class="t">Ventas del turno</div><div class="v">${pesos(c.total_ventas)}</div><div class="s">${c.pedidos} pedido(s)</div></div>
-        ${MEDIOS.filter((m) => c.por_medio[m]).map((m) => `<div class="kpi"><div class="t">${MEDIO[m]}</div><div class="v">${pesos(c.por_medio[m])}</div></div>`).join('')}
+        ${MEDIOS_COBRO.filter((m) => c.por_medio[m]).map((m) => `<div class="kpi"><div class="t">${MEDIO[m]}</div><div class="v">${pesos(c.por_medio[m])}</div></div>`).join('')}
+        ${c.abonos ? `<div class="kpi"><div class="t">Abonos de fiados</div><div class="v">${pesos(c.abonos)}</div>
+          <div class="s">${Object.entries(c.abonos_por_medio || {}).map(([m, v]) => `${MEDIO[m]} ${pesos(v)}`).join(' · ')}</div></div>` : ''}
       </div>
       <div class="dos-col seccion">
         <div class="tarjeta">
@@ -1215,6 +1272,7 @@ async function vistaCaja(el) {
             ${filaCuadre('Base inicial', c.base_inicial)}
             ${filaCuadre('Ventas en efectivo', c.ventas_efectivo, '+')}
             ${filaCuadre('Efectivo entregado por domiciliarios', c.liquidaciones_domiciliarios, '+')}
+            ${c.abonos_efectivo ? filaCuadre('Abonos de fiados en efectivo', c.abonos_efectivo, '+') : ''}
             ${filaCuadre('Gastos pagados de caja', c.gastos_caja, '−')}
             ${filaCuadre('Retiros', c.retiros, '−')}
             <tr class="res"><td>= Efectivo esperado</td><td class="num">${pesos(c.efectivo_esperado)}</td></tr>
@@ -2994,6 +3052,13 @@ async function vistaContabilidad(el) {
         ${inf.documentos.filter((d) => d.tipo === 'NOTA_CREDITO').length} notas crédito ·
         ${inf.documentos.filter((d) => ['error', 'rechazado', 'pendiente'].includes(d.estado)).length} con error o pendientes</p>
     </div>
+    <div class="tarjeta tabla-cont seccion"><h3>Fiado · cuentas por cobrar</h3>
+      <p class="chico">Fiado en el periodo ${pesos(R.fiado_periodo)} · abonos recibidos ${pesos(R.abonos_periodo)} ·
+        <b>por cobrar hoy ${pesos(R.cartera_por_cobrar)}</b></p>
+      ${inf.cartera.length ? `<table><thead><tr><th>Cliente</th><th>Teléfono</th><th class="num">Fiado</th><th class="num">Abonos</th><th class="num">Saldo</th></tr></thead>
+        <tbody>${inf.cartera.map((x) => `<tr><td>${esc(x.cliente || '')}</td><td>${esc(x.telefono)}</td><td class="num">${pesos(x.fiado)}</td>
+          <td class="num">${pesos(x.abonos)}</td><td class="num"><b>${pesos(x.saldo)}</b></td></tr>`).join('')}</tbody></table>` : ''}
+    </div>
     <p class="chico suave">Este informe se genera con lo registrado en el sistema (ventas cobradas, gastos y compras). Es un apoyo para su contador;
       no reemplaza la contabilidad formal ni la asesoría tributaria. Los impuestos se calculan con la tarifa configurada en cada producto.</p>`;
 
@@ -3016,7 +3081,8 @@ async function vistaContabilidad(el) {
         ['Concepto', 'Valor'], ...estado.map(([k, v]) => [k, v]), [],
         ['Ventas (cantidad)', R.pedidos], ['Ticket promedio', R.ticket_promedio], ['Compras de insumos (al inventario)', R.compras_insumos],
         ['Nómina pagada (incluida en gastos)', R.nomina], ['Inventario valorizado hoy', R.inventario_actual],
-        ['Documentos electrónicos vigentes', R.documentos_vigentes], ['Total facturado electrónicamente', R.facturado_electronicamente], [],
+        ['Documentos electrónicos vigentes', R.documentos_vigentes], ['Total facturado electrónicamente', R.facturado_electronicamente],
+        ['Ventas fiadas en el periodo', R.fiado_periodo], ['Abonos recibidos en el periodo', R.abonos_periodo], ['Cartera por cobrar hoy', R.cartera_por_cobrar], [],
         ['Medio de pago', 'Ventas', 'Valor'], ...inf.medios.map((m) => [MEDIO[m.medio] || m.medio, m.pedidos, Number(m.valor)])
       ], [45, 18, 18]);
       hoja('Mensual', [['Mes', 'Ventas', 'Ingresos brutos', 'INC', 'IVA', 'Ingresos netos', 'Costo de ventas', 'Mermas', 'Gastos', 'Compras insumos', 'Utilidad'],
@@ -3040,6 +3106,10 @@ async function vistaContabilidad(el) {
         ...inf.documentos.map((d) => [d.fecha, d.tipo, d.numero, d.cliente || '', d.documento_cliente || '', Number(d.subtotal), Number(d.impuestos), Number(d.total),
           d.estado, d.anulado ? 'Sí' : 'No', d.ambiente, d.cufe || ''])],
         [17, 14, 12, 24, 16, 12, 12, 12, 10, 8, 10, 40]);
+      hoja('Cartera', [['Cliente', 'Teléfono', 'Total fiado', 'Abonos', 'Saldo por cobrar', 'Último fiado'],
+        ...inf.cartera.map((x) => [x.cliente || '', x.telefono, x.fiado, x.abonos, x.saldo, x.ultimo_fiado || ''])], [26, 14, 14, 14, 16, 12]);
+      hoja('Abonos', [['Fecha', 'Cliente', 'Teléfono', 'Medio de pago', 'Valor', 'Nota', 'Anulado'],
+        ...inf.abonos.map((x) => [x.fecha, x.cliente || '', x.telefono, MEDIO[x.medio] || x.medio, x.valor, x.nota || '', x.anulado ? 'Sí' : 'No'])], [17, 26, 14, 14, 12, 26, 8]);
       const nombre = (e.nombre_negocio || 'restaurante').replace(/[^\p{L}\p{N}]+/gu, '_');
       X.writeFile(libro, `Contabilidad_${nombre}_${C.mes ? `${C.anio}-${C.mes}` : C.anio}.xlsx`);
       toast('Excel descargado', 'ok');
@@ -3068,17 +3138,205 @@ async function vistaContabilidad(el) {
         <h2>Otros datos</h2><table>
           ${fila(['Ventas registradas', R.pedidos])}${fila(['Compras de insumos (al inventario)', pesos(R.compras_insumos)])}
           ${fila(['Nómina pagada', pesos(R.nomina)])}${fila(['Inventario valorizado a la fecha de generación', pesos(R.inventario_actual)])}
-          ${fila(['Documentos electrónicos vigentes', `${R.documentos_vigentes} · ${pesos(R.facturado_electronicamente)}`])}</table>
+          ${fila(['Documentos electrónicos vigentes', `${R.documentos_vigentes} · ${pesos(R.facturado_electronicamente)}`])}
+          ${fila(['Ventas fiadas en el periodo', pesos(R.fiado_periodo)])}${fila(['Abonos de clientes en el periodo', pesos(R.abonos_periodo)])}
+          ${fila(['Cartera por cobrar (fiado pendiente) hoy', pesos(R.cartera_por_cobrar)])}</table>
         <p class="nota">Generado el ${fechaHora(new Date())} desde el sistema POS. Informe de apoyo para el contador, basado en las ventas cobradas, gastos y compras
           registrados; no reemplaza la contabilidad formal. El detalle de cada venta, gasto y compra está en el archivo Excel.</p>`, `Informe ${periodo}`);
     }
   };
 }
 
+// ═══ VISTA: Fiados (cuentas por cobrar) ══════════════════════════════════════
+// Enlace de WhatsApp para recordarle al cliente lo que debe (números de Colombia)
+function enlaceWhatsapp(telefono, texto) {
+  let n = String(telefono || '').replace(/\D/g, '');
+  if (n.length === 10) n = '57' + n;
+  return n.length >= 10 ? `https://wa.me/${n}?text=${encodeURIComponent(texto)}` : '';
+}
+const textoRecordatorio = (c) =>
+  `Hola ${c.nombre || ''}, le saluda ${S.ajustes?.nombre_negocio || S.usuario?.restaurante || 'el restaurante'}. ` +
+  `Le recordamos que tiene un saldo pendiente de ${pesos(c.saldo)}. ¡Gracias!`;
+
+async function vistaFiados(el, id) {
+  if (id) return vistaFiadoCliente(el, Number(id));
+  const F = S.fiados ||= { todos: false, q: '' };
+  const lista = await api(`/cartera${F.todos ? '?todos=1' : ''}`);
+  const total = lista.reduce((s, c) => s + Number(c.saldo), 0);
+  const deben = lista.filter((c) => Number(c.saldo) > 0);
+  const viejo = (c) => c.ultimo_fiado && minutos(c.ultimo_fiado) > 30 * 24 * 60;
+  const pintar = () => {
+    const q = F.q.trim().toLowerCase();
+    const filas = lista.filter((c) => !q || `${c.nombre} ${c.telefono}`.toLowerCase().includes(q));
+    $('#fiados-filas').innerHTML = filas.map((c) => `<tr class="clic" data-acc="ver" data-id="${c.id}">
+      <td><b>${esc(c.nombre || 'Sin nombre')}</b><div class="chico suave">${esc(c.telefono)}</div></td>
+      <td class="num">${pesos(c.fiado)}</td><td class="num">${pesos(c.abonos)}</td>
+      <td class="num"><b class="${Number(c.saldo) > 0 ? 'negativo' : 'positivo'}">${pesos(c.saldo)}</b>
+        ${c.cupo_fiado != null ? `<div class="chico suave">cupo ${pesos(c.cupo_fiado)}</div>` : ''}</td>
+      <td>${c.ultimo_fiado ? fechaHora(c.ultimo_fiado).split(',')[0] : '—'} ${viejo(c) && Number(c.saldo) > 0 ? '<span class="chip vencido">+30 días</span>' : ''}</td>
+      <td class="num">${Number(c.saldo) > 0 ? `<button class="peq exito" data-acc="abonar" data-id="${c.id}">Abonar</button>` : ''}</td></tr>`).join('')
+      || `<tr><td colspan="6" class="vacio">${lista.length ? 'Sin resultados.' : 'Nadie debe nada. Para fiar, elija "Fiado" al cobrar un pedido.'}</td></tr>`;
+  };
+  el.innerHTML = `
+    <div class="titulo-vista"><h2>Fiados · cuentas por cobrar</h2></div>
+    <div class="kpis">
+      <div class="kpi destacado"><div class="t">Total por cobrar</div><div class="v">${pesos(total)}</div></div>
+      <div class="kpi"><div class="t">Clientes que deben</div><div class="v">${deben.length}</div></div>
+      <div class="kpi"><div class="t">Con más de 30 días</div><div class="v">${deben.filter(viejo).length}</div></div>
+    </div>
+    <div class="tarjeta fila" style="margin:1rem 0">
+      <input id="fiados-q" class="crece" placeholder="Buscar cliente por nombre o teléfono" value="${esc(F.q)}">
+      <label class="check"><input type="checkbox" id="fiados-todos" ${F.todos ? 'checked' : ''}> Ver también los que ya pagaron</label>
+    </div>
+    <div class="tarjeta tabla-cont"><table>
+      <thead><tr><th>Cliente</th><th class="num">Fiado</th><th class="num">Abonado</th><th class="num">Saldo</th><th>Último fiado</th><th></th></tr></thead>
+      <tbody id="fiados-filas"></tbody></table></div>`;
+  pintar();
+  $('#fiados-q').addEventListener('input', (e) => { F.q = e.target.value; pintar(); });
+  $('#fiados-todos').addEventListener('change', (e) => { F.todos = e.target.checked; vistaFiados(el); });
+  S.acc = {
+    ver: (b) => { location.hash = `fiados/${b.dataset.id}`; },
+    abonar: (b) => {
+      const c = lista.find((x) => x.id === Number(b.dataset.id));
+      modalAbono(c, () => vistaFiados(el));
+    }
+  };
+}
+
+async function vistaFiadoCliente(el, id) {
+  const { cliente: c, movimientos } = await api(`/cartera/${id}`);
+  const wa = Number(c.saldo) > 0 ? enlaceWhatsapp(c.telefono, textoRecordatorio(c)) : '';
+  el.innerHTML = `
+    <div class="titulo-vista"><h2><a href="#fiados" class="suave">Fiados</a> › ${esc(c.nombre || 'Sin nombre')}</h2>
+      <div class="fila">
+        ${wa ? `<a class="btn" href="${wa}" target="_blank" rel="noopener">💬 Recordar por WhatsApp</a>` : ''}
+        <button data-acc="imprimir">🖨️ Estado de cuenta</button>
+        <button data-acc="editar">✏️ Datos y cupo</button>
+        ${Number(c.saldo) > 0 ? '<button class="exito" data-acc="abonar">+ Registrar abono</button>' : ''}
+      </div></div>
+    <div class="kpis">
+      <div class="kpi destacado"><div class="t">Saldo pendiente</div><div class="v ${Number(c.saldo) > 0 ? 'negativo' : 'positivo'}">${pesos(c.saldo)}</div></div>
+      <div class="kpi"><div class="t">Teléfono</div><div class="v" style="font-size:1.1rem">${esc(c.telefono)}</div></div>
+      <div class="kpi"><div class="t">Cupo de fiado</div><div class="v" style="font-size:1.1rem">${c.cupo_fiado != null ? pesos(c.cupo_fiado) : 'Sin límite'}</div>
+        ${c.cupo_fiado != null ? `<div class="s">Disponible ${pesos(Math.max(0, c.cupo_fiado - c.saldo))}</div>` : ''}</div>
+    </div>
+    <div class="tarjeta tabla-cont seccion"><h3>Movimientos</h3><table>
+      <thead><tr><th>Fecha</th><th>Movimiento</th><th>Registró</th><th class="num">Fiado</th><th class="num">Abono</th><th class="num">Saldo</th><th></th></tr></thead>
+      <tbody>${movimientos.slice().reverse().map((m) => `<tr class="${m.anulado ? 'suave' : ''}">
+        <td>${fechaHora(m.fecha)}</td>
+        <td>${m.tipo === 'FIADO' ? `Pedido <a href="#pedido/${m.pedido_id}">#${m.pedido_numero}</a>`
+          : `Abono · ${MEDIO[m.medio]}${m.nota ? ` · ${esc(m.nota)}` : ''}`}
+          ${m.anulado ? `<div class="chico negativo">Anulado: ${esc(m.motivo_anulacion || '')}</div>` : ''}</td>
+        <td>${esc(m.usuario || '')}</td>
+        <td class="num">${m.tipo === 'FIADO' ? pesos(m.valor) : ''}</td>
+        <td class="num positivo">${m.tipo === 'ABONO' ? pesos(m.valor) : ''}</td>
+        <td class="num"><b>${pesos(m.saldo)}</b></td>
+        <td>${m.tipo === 'ABONO' && !m.anulado ? `<button class="peq peligro" data-acc="anular" data-id="${m.id}">Anular</button>` : ''}</td></tr>`).join('')
+        || '<tr><td colspan="7" class="vacio">Sin movimientos.</td></tr>'}</tbody></table></div>`;
+
+  S.acc = {
+    abonar: () => modalAbono(c, () => vistaFiadoCliente(el, id)),
+    anular: async (b) => {
+      const motivo = await confirmar('¿Anular este abono? El valor vuelve a quedar como deuda del cliente y sale del cuadre de la caja.',
+        { boton: 'Anular', peligro: true, campo: 'Motivo' });
+      if (!motivo) return;
+      await api(`/cartera/abonos/${b.dataset.id}/anular`, { method: 'POST', body: { motivo } });
+      toast('Abono anulado', 'ok');
+      vistaFiadoCliente(el, id);
+    },
+    editar: () => abrirModal(`${cabeceraModal('Datos del cliente')}
+      <form>
+        <div class="campo"><label>Nombre</label><input name="nombre" required value="${esc(c.nombre || '')}" autofocus></div>
+        <div class="campo"><label>Cupo máximo de fiado</label>
+          <input name="cupo" type="number" min="0" step="1000" inputmode="numeric" value="${c.cupo_fiado ?? ''}" placeholder="Vacío = sin límite">
+          <p class="chico suave">Si el cliente llega a este valor, el sistema no deja fiarle más hasta que abone.</p></div>
+        <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Guardar</button></div>
+      </form>`, {
+      submit: async (f, _m, cerrar) => {
+        await api(`/cartera/${id}`, { method: 'PUT', body: { nombre: f.nombre.value, cupo_fiado: f.cupo.value } });
+        cerrar(); toast('Cliente actualizado', 'ok'); vistaFiadoCliente(el, id);
+      }
+    }),
+    imprimir: () => imprimir(ticketEstadoCuenta(c, movimientos), `Estado de cuenta · ${c.nombre || c.telefono}`)
+  };
+}
+
+function modalAbono(c, listo) {
+  abrirModal(`${cabeceraModal(`Abono de ${esc(c.nombre || c.telefono)}`)}
+    <form>
+      <div class="total" style="border-top:0;margin-top:0"><span>Debe</span><span>${pesos(c.saldo)}</span></div>
+      <div class="campos">
+        <div><label>Valor del abono</label><input name="valor" type="number" min="1" max="${Number(c.saldo)}" step="100" inputmode="numeric" required autofocus value="${Number(c.saldo)}"></div>
+        <div><label>Medio de pago</label><select name="medio">${MEDIOS.map((m) => `<option value="${m}">${MEDIO[m]}</option>`).join('')}</select></div>
+      </div>
+      <div class="campo" style="margin-top:.6rem"><label>Nota (opcional)</label><input name="nota"></div>
+      <p id="queda" class="chico"></p>
+      <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="exito">Registrar abono</button></div>
+    </form>`, {
+    input: (_e, m) => {
+      const v = Number(m.querySelector('[name=valor]').value) || 0;
+      $('#queda', m).textContent = v ? `Queda debiendo ${pesos(Math.max(0, c.saldo - v))}` : '';
+    },
+    submit: async (f, _m, cerrar) => {
+      const a = await api(`/cartera/${c.id}/abono`, { method: 'POST', body: { valor: Number(f.valor.value), medio: f.medio.value, nota: f.nota.value } });
+      cerrar();
+      toast(Number(a.saldo) > 0 ? `Abono registrado. Queda debiendo ${pesos(a.saldo)}` : 'Abono registrado. ¡Quedó a paz y salvo!', 'ok');
+      imprimir(ticketAbono(c, a), 'Recibo de abono');
+      listo();
+    }
+  });
+}
+
+function ticketAbono(c, a) {
+  return `
+    ${encabezadoNegocio()}
+    <hr>
+    <div class="titulo">RECIBO DE ABONO</div>
+    <table class="datos" style="margin-top:.3em">
+      ${filaDato('Recibo', `<b>#${a.id}</b>`)}
+      ${filaDato('Fecha', fechaHora(a.creado_en))}
+      ${filaDato('Cliente', esc(c.nombre || ''))}
+      ${filaDato('Teléfono', esc(c.telefono || ''))}
+      ${filaDato('Medio', MEDIO[a.medio])}
+      ${filaDato('Nota', esc(a.nota || ''))}
+    </table>
+    <hr class="doble">
+    <table class="total"><tr><td>ABONO</td><td class="r">${pesos(a.valor)}</td></tr></table>
+    <table><tr><td class="b">Saldo pendiente</td><td class="r b">${pesos(a.saldo)}</td></tr></table>
+    ${Number(a.saldo) <= 0 ? '<p class="c g">¡A PAZ Y SALVO!</p>' : ''}
+    <hr>
+    <p class="pie">Recibió: ${esc(S.usuario?.nombre || '')} · Impreso: ${fechaHora(new Date())}</p>`;
+}
+
+function ticketEstadoCuenta(c, movimientos) {
+  const vigentes = movimientos.filter((m) => !m.anulado);
+  return `
+    ${encabezadoNegocio()}
+    <hr>
+    <div class="titulo">ESTADO DE CUENTA</div>
+    <table class="datos" style="margin-top:.3em">
+      ${filaDato('Cliente', `<b>${esc(c.nombre || '')}</b>`)}
+      ${filaDato('Teléfono', esc(c.telefono || ''))}
+      ${filaDato('Fecha', fechaHora(new Date()))}
+    </table>
+    <hr>
+    <table>
+      <tr><th>Fecha</th><th>Detalle</th><th class="r">Valor</th></tr>
+      ${vigentes.map((m) => `<tr class="linea"><td>${fechaHora(m.fecha).split(',')[0]}</td>
+        <td>${m.tipo === 'FIADO' ? `Pedido #${m.pedido_numero}` : `Abono ${MEDIO[m.medio]}`}</td>
+        <td class="r">${m.tipo === 'FIADO' ? '' : '−'}${pesos(m.valor)}</td></tr>`).join('')}
+    </table>
+    <hr class="doble">
+    <table class="total"><tr><td>SALDO</td><td class="r">${pesos(c.saldo)}</td></tr></table>
+    <hr>
+    <p class="pie">Impreso: ${fechaHora(new Date())} · ${esc(S.usuario?.nombre || '')}</p>`;
+}
+
 const VISTAS = {
   pedidos: vistaPedidos, pedido: vistaPedido, cocina: vistaCocina, domicilios: vistaDomicilios, caja: vistaCaja,
   inventario: vistaInventario, gastos: vistaGastos, menu: vistaMenu, reportes: vistaReportes, ajustes: vistaAjustes,
-  restaurantes: vistaRestaurantes, personal: vistaPersonal, facturas: vistaFacturas, contabilidad: vistaContabilidad
+  restaurantes: vistaRestaurantes, personal: vistaPersonal, facturas: vistaFacturas, contabilidad: vistaContabilidad,
+  fiados: vistaFiados
 };
 
 iniciar();

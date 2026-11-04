@@ -515,3 +515,12 @@ input[type="color"] { padding: .2rem; height: 42px; cursor: pointer; }
   .mini input { width: 64px; }
   .receta-fila { grid-template-columns: minmax(0, 1fr) 80px 2rem auto; }
 }
+
+/* ─── Fiados (cuentas por cobrar) ─── */
+tr.clic { cursor: pointer; }
+tr.clic:hover td { background: color-mix(in srgb, var(--amarillo) 10%, transparent); }
+.chip.vencido { background: color-mix(in srgb, var(--rojo) 14%, transparent); color: var(--rojo); }
+.fiado-caja { border: 1px dashed var(--borde); border-radius: 14px; padding: .6rem .75rem; margin: .4rem 0 .2rem;
+  background: color-mix(in srgb, var(--amarillo) 8%, transparent); }
+.fiado-res { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .4rem; }
+.fiado-cliente { gap: .5rem; }

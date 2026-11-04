@@ -27,7 +27,7 @@ r.get('/contabilidad/informe', admin, ah(async (req, res) => {
   if (!fechaValida(desde) || !fechaValida(hasta) || desde > hasta) throw new ErrorApp('Rango de fechas inválido');
   const p = [desde, hasta];
 
-  const [dias, ventas, impuestos, medios, gastos, compras, documentos, inventario, ajustes] = await Promise.all([
+  const [dias, ventas, impuestos, medios, gastos, compras, documentos, inventario, ajustes, abonos, cartera] = await Promise.all([
     pool.query(`SELECT * FROM reporte_utilidad($1, $2)`, p),
     // Detalle de cada venta cobrada
     pool.query(`
@@ -82,7 +82,17 @@ r.get('/contabilidad/informe', admin, ah(async (req, res) => {
         FROM documento_electronico d
        WHERE (d.creado_en AT TIME ZONE 'America/Bogota')::date BETWEEN $1 AND $2 ORDER BY d.id`, p),
     pool.query(`SELECT coalesce(sum(valor), 0) AS valor FROM v_stock WHERE activo`),
-    pool.query(`SELECT clave, valor FROM ajuste WHERE clave IN ('nombre_negocio', 'fe_razon_social', 'fe_nit', 'fe_dv', 'direccion', 'ciudad', 'telefono')`)
+    pool.query(`SELECT clave, valor FROM ajuste WHERE clave IN ('nombre_negocio', 'fe_razon_social', 'fe_nit', 'fe_dv', 'direccion', 'ciudad', 'telefono')`),
+    // Abonos recibidos de clientes con fiado en el periodo
+    pool.query(`
+      SELECT to_char(a.creado_en AT TIME ZONE 'America/Bogota', 'YYYY-MM-DD HH24:MI') AS fecha, cl.nombre AS cliente, cl.telefono,
+             a.medio, a.valor, a.nota, a.anulado
+        FROM abono_cliente a JOIN cliente cl ON cl.id = a.cliente_id
+       WHERE (a.creado_en AT TIME ZONE 'America/Bogota')::date BETWEEN $1 AND $2 ORDER BY a.id`, p),
+    // Cartera: lo que deben los clientes hoy
+    pool.query(`SELECT nombre AS cliente, telefono, fiado, abonos, saldo,
+                       to_char(ultimo_fiado AT TIME ZONE 'America/Bogota', 'YYYY-MM-DD') AS ultimo_fiado
+                  FROM v_cartera WHERE saldo > 0 ORDER BY saldo DESC`)
   ]);
 
   // ─── Resumen del periodo ───
@@ -157,7 +167,10 @@ r.get('/contabilidad/informe', admin, ah(async (req, res) => {
       inventario_actual: r2(inventario.rows[0].valor),
       ticket_promedio: ventas.rows.length ? r2(ingresosBrutos / ventas.rows.length) : 0,
       documentos_vigentes: docsVigentes.length,
-      facturado_electronicamente: r2(sum(docsVigentes, 'total'))
+      facturado_electronicamente: r2(sum(docsVigentes, 'total')),
+      fiado_periodo: r2(sum(medios.rows.filter((x) => x.medio === 'FIADO'), 'valor')),
+      abonos_periodo: r2(sum(abonos.rows.filter((x) => !x.anulado), 'valor')),
+      cartera_por_cobrar: r2(sum(cartera.rows, 'saldo'))
     },
     mensual,
     impuestos: impuestos.rows.map((x) => ({ tipo: x.tipo, tasa: n(x.tasa), total: r2(x.total), base: r2(x.base), impuesto: r2(x.impuesto) })),
@@ -169,7 +182,9 @@ r.get('/contabilidad/informe', admin, ah(async (req, res) => {
                                       base: r2(n(v.total) - n(v.inc) - n(v.iva)) })),
     gastos: gastos.rows,
     compras: compras.rows,
-    documentos: docs
+    documentos: docs,
+    abonos: abonos.rows.map((x) => ({ ...x, valor: n(x.valor) })),
+    cartera: cartera.rows.map((x) => ({ ...x, fiado: n(x.fiado), abonos: n(x.abonos), saldo: n(x.saldo) }))
   });
 }));
 
