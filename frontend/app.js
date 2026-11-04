@@ -1338,7 +1338,7 @@ async function vistaCaja(el) {
       vistaCaja(el);
     },
     retiro: () => abrirModal(`${cabeceraModal('Retiro de caja')}
-      <form><div class="campo"><label>Valor</label><input name="valor" type="number" min="1" step="100" required autofocus></div>
+      <form><div class="campo"><label>Valor</label><input name="valor" type="number" min="1" step="1" inputmode="numeric" required autofocus></div>
       <div class="campo"><label>Motivo</label><input name="motivo" required placeholder="Ej: consignación, pago al dueño"></div>
       <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Registrar</button></div></form>`, {
       submit: async (f, _m, cerrar) => {
@@ -1532,7 +1532,7 @@ async function modalGasto(listo) {
         <div id="lineas">${linea()}${linea()}</div>
         <button type="button" class="peq" data-acc="linea">+ Otra línea</button>
       </div>
-      <div id="simple" hidden class="campo" style="margin-top:.6rem"><label>Valor</label><input name="valor" type="number" min="1" step="100"></div>
+      <div id="simple" hidden class="campo" style="margin-top:.6rem"><label>Valor</label><input name="valor" type="number" min="1" step="1" inputmode="numeric"></div>
       <div class="campos" style="margin-top:.6rem">
         <div><label>Medio de pago</label><select name="medio">${['EFECTIVO', 'NEQUI', 'DAVIPLATA', 'TARJETA', 'TRANSFERENCIA', 'CREDITO'].map((m) => `<option value="${m}">${MEDIO[m]}</option>`).join('')}</select></div>
         <label class="check" style="align-self:flex-end"><input type="checkbox" name="caja"> Pagado con efectivo de la caja</label>
@@ -3266,7 +3266,7 @@ function modalAbono(c, listo) {
     <form>
       <div class="total" style="border-top:0;margin-top:0"><span>Debe</span><span>${pesos(c.saldo)}</span></div>
       <div class="campos">
-        <div><label>Valor del abono</label><input name="valor" type="number" min="1" max="${Number(c.saldo)}" step="100" inputmode="numeric" required autofocus value="${Number(c.saldo)}"></div>
+        <div><label>Valor del abono</label><input name="valor" type="number" min="1" max="${Number(c.saldo)}" step="1" inputmode="numeric" required autofocus value="${Number(c.saldo)}"></div>
         <div><label>Medio de pago</label><select name="medio">${MEDIOS.map((m) => `<option value="${m}">${MEDIO[m]}</option>`).join('')}</select></div>
       </div>
       <div class="campo" style="margin-top:.6rem"><label>Nota (opcional)</label><input name="nota"></div>
