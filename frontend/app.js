@@ -841,11 +841,11 @@ function agregarProducto(p) {
     toast(`+ ${p.nombre}`);
     return pintarCuenta();
   }
-  abrirModal(`
+  const { m } = abrirModal(`
     ${cabeceraModal(esc(p.nombre))}
     <form>
       ${p.grupos.map((g) => `
-        <fieldset class="grupo-op">
+        <fieldset class="grupo-op" data-si="${g.mostrar_si_opcion || ''}">
           <legend>${esc(g.nombre)} <span class="suave chico">(${g.min_sel === g.max_sel ? `elija ${g.min_sel}` : `de ${g.min_sel} a ${g.max_sel}`})</span></legend>
           ${g.opciones.map((o, i) => `
             <label class="check"><input type="${g.max_sel === 1 ? 'radio' : 'checkbox'}" name="g${g.id}" value="${o.id}"
@@ -858,11 +858,13 @@ function agregarProducto(p) {
       </div>
       <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Agregar</button></div>
     </form>`, {
+    change: (_e, m) => condicionales(m),
     submit: (f, _m, cerrar) => {
       const opciones = [];
       const nombresOp = [];
       let extra = 0;
       for (const g of p.grupos) {
+        if (!grupoVisible(g, f)) continue;
         const sel = $$(`input[name="g${g.id}"]:checked`, f).map((x) => Number(x.value));
         if (sel.length < g.min_sel || sel.length > g.max_sel) throw new Error(`Revise "${g.nombre}"`);
         for (const oid of sel) {
@@ -877,6 +879,16 @@ function agregarProducto(p) {
       cerrar();
       pintarCuenta();
     }
+  });
+  condicionales(m);
+}
+
+// Un grupo condicional (ej: Término) solo aplica si está elegida su opción
+const grupoVisible = (g, f) => !g.mostrar_si_opcion || !!f.querySelector(`input[value="${g.mostrar_si_opcion}"]:checked`);
+function condicionales(m) {
+  $$('fieldset[data-si]', m).forEach((fs) => {
+    if (!fs.dataset.si) return;
+    fs.hidden = !m.querySelector(`input[value="${fs.dataset.si}"]:checked`);
   });
 }
 
@@ -1645,7 +1657,7 @@ async function vistaMenu(el) {
         <div><label>Precio</label><input data-dinero name="precio" type="number" min="0" step="100" value="${p.precio}" required></div>
         <button style="align-self:end">Guardar</button>
       </form>
-      ${p.grupos.map((g) => `
+      ${p.grupos.filter((g) => !g.mostrar_si_opcion).map((g) => `
         <fieldset class="grupo-op">
           <legend>${esc(g.nombre)} disponible hoy</legend>
           <div class="opciones-dia">${g.opciones.map((o) => `
@@ -1812,16 +1824,24 @@ function modalProducto(p, categoriaId) {
     if (!prod) return `${cabeceraModal('Nuevo producto')}${datos}
       <p class="chico suave">Después de crearlo podrá agregarle opciones para elegir (proteína, bebida, término…) y su receta.</p>`;
 
+    // Opciones de los otros grupos del plato que pueden mostrar este grupo (ej: Término si eligen "Carne de res")
+    const condicionPosible = (g) => prod.grupos.filter((x) => x.id !== g.id && !x.mostrar_si_opcion)
+      .flatMap((x) => x.opciones.map((o) => ({ id: o.id, nombre: o.nombre, grupo: x.nombre })));
     const grupos = prod.grupos.map((g) => `
       <div class="grupo-edit">
         <form class="grupo-cab" data-form="grupo" data-id="${g.id}">
           <input name="nombre" value="${esc(g.nombre)}" aria-label="Nombre del grupo" class="crece">
           <label class="mini">Mín<input name="min_sel" type="number" min="0" value="${g.min_sel}"></label>
           <label class="mini">Máx<input name="max_sel" type="number" min="1" value="${g.max_sel}"></label>
+          ${condicionPosible(g).length ? `<label class="mini">Mostrar solo si eligen
+            <select name="mostrar_si_opcion"><option value="">Siempre</option>
+              ${condicionPosible(g).map((o) => `<option value="${o.id}" ${o.id === g.mostrar_si_opcion ? 'selected' : ''}>${esc(o.grupo)}: ${esc(o.nombre)}</option>`).join('')}
+            </select></label>` : ''}
           <button class="peq">Guardar</button>
           <button type="button" class="peq peligro icono" data-acc="eliminarGrupo" data-id="${g.id}" title="Eliminar grupo" aria-label="Eliminar grupo">🗑️</button>
         </form>
-        <div class="suave chico">${g.min_sel === 0 ? 'Opcional' : 'Obligatorio'} · ${g.max_sel === 1 ? 'se elige una' : `hasta ${g.max_sel}`}</div>
+        <div class="suave chico">${g.min_sel === 0 ? 'Opcional' : 'Obligatorio'} · ${g.max_sel === 1 ? 'se elige una' : `hasta ${g.max_sel}`}
+          ${g.mostrar_si_opcion ? ` · <b>aparece solo si eligen ${esc(condicionPosible(g).find((o) => o.id === g.mostrar_si_opcion)?.nombre || '')}</b>` : ''}</div>
         ${g.opciones.map((o) => `
           <form class="opcion-fila ${o.activo ? '' : 'inactiva'}" data-form="opcion" data-id="${o.id}">
             <input name="nombre" value="${esc(o.nombre)}" aria-label="Opción" class="crece">
@@ -1885,7 +1905,8 @@ function modalProducto(p, categoriaId) {
           break;
         }
         case 'grupo':
-          await api(`/grupos/${f.dataset.id}`, { method: 'PATCH', body: { nombre: v('nombre'), min_sel: v('min_sel'), max_sel: v('max_sel') } });
+          await api(`/grupos/${f.dataset.id}`, { method: 'PATCH', body: { nombre: v('nombre'), min_sel: v('min_sel'), max_sel: v('max_sel'),
+            ...(f.elements.mostrar_si_opcion ? { mostrar_si_opcion: v('mostrar_si_opcion') || null } : {}) } });
           toast('Grupo guardado', 'ok');
           break;
         case 'opcion':

@@ -56,7 +56,7 @@ async function agregarItems(c, pedidoId, items = []) {
 
     const elegidas = [...new Set((it.opciones || []).map(Number))];
     const { rows: grupos } = await c.query(`
-      SELECT g.id, g.nombre, g.min_sel, g.max_sel,
+      SELECT g.id, g.nombre, g.min_sel, g.max_sel, g.mostrar_si_opcion,
              coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'nombre', o.nombre, 'precio_extra', o.precio_extra))
                       FILTER (WHERE o.id IS NOT NULL), '[]') AS opciones
         FROM grupo_opcion g LEFT JOIN opcion o ON o.grupo_id = g.id AND o.activo
@@ -65,6 +65,8 @@ async function agregarItems(c, pedidoId, items = []) {
     const opcionesItem = [];
     for (const g of grupos) {
       const sel = g.opciones.filter((o) => elegidas.includes(o.id));
+      // Grupo condicional (ej: Término solo si la proteína es res): si no aplica, no se exige ni se acepta
+      if (g.mostrar_si_opcion && !elegidas.includes(g.mostrar_si_opcion)) continue;
       if (sel.length < g.min_sel || sel.length > g.max_sel) {
         throw new ErrorApp(`${prod.nombre}: elija ${g.min_sel === g.max_sel ? g.min_sel : `entre ${g.min_sel} y ${g.max_sel}`} en "${g.nombre}"`);
       }

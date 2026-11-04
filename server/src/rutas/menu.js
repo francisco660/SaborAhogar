@@ -20,6 +20,7 @@ r.get('/menu', ah(async (req, res) => {
         'grupos', coalesce((
           SELECT jsonb_agg(jsonb_build_object(
             'id', g.id, 'nombre', g.nombre, 'min_sel', g.min_sel, 'max_sel', g.max_sel,
+            'mostrar_si_opcion', g.mostrar_si_opcion,
             'opciones', coalesce((
               SELECT jsonb_agg(jsonb_build_object('id', o.id, 'nombre', o.nombre,
                        'precio_extra', o.precio_extra, 'activo', o.activo) ORDER BY o.orden, o.id)
@@ -134,14 +135,25 @@ r.post('/productos/:id/grupos', admin, ah(async (req, res) => {
   res.json(rows[0]);
 }));
 
+// mostrar_si_opcion: el grupo solo aparece si eligen esa opción (de otro grupo del mismo plato)
 r.patch('/grupos/:id', admin, ah(async (req, res) => {
   const min = numero(req.body.min_sel);
   const max = numero(req.body.max_sel);
   validarSel(min, max);
+  const cambiaCondicion = 'mostrar_si_opcion' in req.body;
+  const condicion = numero(req.body.mostrar_si_opcion);
+  if (condicion) {
+    const { rows: [ok] } = await pool.query(`
+      SELECT 1 FROM opcion o JOIN grupo_opcion go ON go.id = o.grupo_id
+        JOIN grupo_opcion g ON g.id = $1 AND g.producto_id = go.producto_id AND g.id <> go.id
+       WHERE o.id = $2 AND go.mostrar_si_opcion IS NULL`, [req.params.id, condicion]);
+    if (!ok) throw new ErrorApp('La condición debe ser una opción de otro grupo del mismo plato (que no dependa a su vez de otra)');
+  }
   await pool.query(
     `UPDATE grupo_opcion SET nombre = coalesce($2, nombre), min_sel = coalesce($3, min_sel),
-            max_sel = coalesce($4, max_sel) WHERE id = $1`,
-    [req.params.id, texto(req.body.nombre), min, max]);
+            max_sel = coalesce($4, max_sel),
+            mostrar_si_opcion = CASE WHEN $5 THEN $6::int ELSE mostrar_si_opcion END WHERE id = $1`,
+    [req.params.id, texto(req.body.nombre), min, max, cambiaCondicion, condicion]);
   avisar('menu');
   res.json({ ok: true });
 }));
