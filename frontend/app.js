@@ -96,14 +96,18 @@ const TEMAS = {
   campo:    { nombre: 'Campestre', primario: '#2e7d32', acento: '#c9a227', barra: '#16231a', barra2: '#33503a', icono: '🌿' },
   mar:      { nombre: 'Mar',       primario: '#0277bd', acento: '#26c6da', barra: '#0b1726', barra2: '#1b3a5c', icono: '🐟' },
   elegante: { nombre: 'Elegante',  primario: '#8e2442', acento: '#d4af37', barra: '#121212', barra2: '#2d2a26', icono: '' },
-  cafe:     { nombre: 'Café',      primario: '#8d5524', acento: '#e0a458', barra: '#1c130d', barra2: '#4a3324', icono: '☕' }
+  cafe:     { nombre: 'Café',      primario: '#8d5524', acento: '#e0a458', barra: '#1c130d', barra2: '#4a3324', icono: '☕' },
+  cristal:  { nombre: 'Cristal',   primario: '#9b5cff', acento: '#ff7ac6', barra: '#5b4bd6', barra2: '#2f8fd0', icono: '✨', estilo: 'cristal' }
 };
+// Acabados: "cristal" = efecto vidrio translúcido e iridiscente (sirve con cualquier color)
+const ESTILOS = { '': 'Normal', cristal: 'Cristal (vidrio translúcido)' };
 const temaDe = (aj = {}) => ({
   primario: aj.tema_primario || TEMAS.hogar.primario,
   acento: aj.tema_acento || TEMAS.hogar.acento,
   barra: aj.tema_barra || TEMAS.hogar.barra,
   barra2: aj.tema_barra2 || TEMAS.hogar.barra2,
-  icono: aj.tema_icono ?? ''
+  icono: aj.tema_icono ?? '',
+  estilo: aj.tema_estilo || ''
 });
 function aplicarTema(t) {
   const r = document.documentElement.style;
@@ -117,6 +121,8 @@ function aplicarTema(t) {
   r.setProperty('--amarillo-claro', mezcla(t.acento, 'white', 30));
   r.setProperty('--cafe', t.barra);
   r.setProperty('--cafe-medio', t.barra2);
+  if (ESTILOS[t.estilo] && t.estilo) document.documentElement.dataset.estilo = t.estilo;
+  else delete document.documentElement.dataset.estilo;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t.barra);
 }
 aplicarTema(almacen.leer('pos_tema') || temaDe());
@@ -2114,7 +2120,7 @@ async function vistaAjustes(el) {
       <p class="chico suave">Colores e ícono de este restaurante. Se ven en todos sus equipos.</p>
       <div class="temas">${Object.entries(TEMAS).map(([k, t]) => `
         <button type="button" class="tema-opcion" data-acc="elegirTema" data-tema="${k}" title="${t.nombre}">
-          <span class="tema-muestra" style="background:linear-gradient(135deg, ${t.barra} 0 50%, ${t.primario} 50% 75%, ${t.acento} 75%)"></span>
+          <span class="tema-muestra ${t.estilo ? `muestra-${t.estilo}` : ''}" style="background:linear-gradient(135deg, ${t.barra} 0 50%, ${t.primario} 50% 75%, ${t.acento} 75%)"></span>
           <span>${t.icono ? t.icono + ' ' : ''}${t.nombre}</span>
         </button>`).join('')}</div>
       <form data-submit="apariencia" id="form-tema">
@@ -2124,6 +2130,8 @@ async function vistaAjustes(el) {
           <div><label>Menú lateral (arriba)</label><input type="color" name="tema_barra" value="${temaDe(aj).barra}"></div>
           <div><label>Menú lateral (abajo)</label><input type="color" name="tema_barra2" value="${temaDe(aj).barra2}"></div>
           <div><label>Ícono junto al nombre</label><input name="tema_icono" value="${esc(temaDe(aj).icono)}" maxlength="4" placeholder="Ej: 🔥"></div>
+          <div><label>Acabado</label><select name="tema_estilo">${Object.entries(ESTILOS).map(([k, v]) =>
+            `<option value="${k}" ${k === temaDe(aj).estilo ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
         </div>
         <div class="fila" style="margin-top:.6rem">
           <button class="primario">Guardar apariencia</button>
@@ -2236,13 +2244,15 @@ async function vistaAjustes(el) {
       const f = $('#form-tema');
       f.tema_primario.value = t.primario; f.tema_acento.value = t.acento;
       f.tema_barra.value = t.barra; f.tema_barra2.value = t.barra2; f.tema_icono.value = t.icono;
+      f.tema_estilo.value = t.estilo || '';
       aplicarTema(t);
     },
     deshacerTema: () => vistaAjustes(el),
     _input: (e) => {
       const f = e.target.form;
       if (f?.id !== 'form-tema') return;
-      aplicarTema({ primario: f.tema_primario.value, acento: f.tema_acento.value, barra: f.tema_barra.value, barra2: f.tema_barra2.value });
+      aplicarTema({ primario: f.tema_primario.value, acento: f.tema_acento.value, barra: f.tema_barra.value, barra2: f.tema_barra2.value,
+                    estilo: f.tema_estilo.value });
     },
     apariencia: async (f) => {
       const body = datosForm(f);

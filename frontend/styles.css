@@ -524,3 +524,161 @@ tr.clic:hover td { background: color-mix(in srgb, var(--amarillo) 10%, transpare
   background: color-mix(in srgb, var(--amarillo) 8%, transparent); }
 .fiado-res { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .4rem; }
 .fiado-cliente { gap: .5rem; }
+
+/* ═══ Acabado "Cristal" (Ajustes → Apariencia) ═══════════════════════════════
+   Vidrio translúcido con desenfoque, borde de luz y brillo iridiscente.
+   Usa los colores del tema (--rojo = principal, --amarillo = acento), así que
+   funciona con cualquier combinación. El desenfoque va solo en las superficies
+   grandes para que los celulares y tabletas sencillas no se pongan lentos. */
+html[data-estilo="cristal"] {
+  --texto: #251c3b;
+  --suave: #5f5680;
+  --borde: rgba(255, 255, 255, 0.6);
+  --cristal: linear-gradient(135deg, rgba(255,255,255,0.62), rgba(255,255,255,0.28));
+  --cristal-fuerte: linear-gradient(135deg, rgba(255,255,255,0.82), rgba(255,255,255,0.5));
+  --brillo: inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(255,255,255,0.25);
+  --sombra: 0 14px 36px rgba(76, 52, 150, 0.16), var(--brillo);
+  --sombra-strong: 0 22px 54px rgba(76, 52, 150, 0.24), var(--brillo);
+  --desenfoque: blur(18px) saturate(170%);
+}
+html[data-estilo="cristal"] body {
+  background:
+    radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--rojo) 34%, transparent), transparent 34%),
+    radial-gradient(circle at 88% 12%, color-mix(in srgb, #5ad1ff 40%, transparent), transparent 32%),
+    radial-gradient(circle at 75% 85%, color-mix(in srgb, var(--amarillo) 34%, transparent), transparent 36%),
+    radial-gradient(circle at 20% 90%, color-mix(in srgb, #b8f2e6 50%, transparent), transparent 30%),
+    linear-gradient(135deg, #f6f0ff 0%, #fdf0f8 45%, #eef7ff 100%);
+  background-attachment: fixed;
+}
+html[data-estilo="cristal"] body::before {
+  background: linear-gradient(115deg, rgba(255,255,255,0.35), rgba(255,255,255,0) 40%, rgba(255,255,255,0.18) 70%, rgba(255,255,255,0));
+}
+
+/* Superficies de vidrio */
+html[data-estilo="cristal"] .tarjeta,
+html[data-estilo="cristal"] .kpi,
+html[data-estilo="cristal"] .login-caja {
+  background: var(--cristal); border: 1px solid var(--borde); box-shadow: var(--sombra);
+  backdrop-filter: var(--desenfoque); -webkit-backdrop-filter: var(--desenfoque);
+}
+html[data-estilo="cristal"] .tarjeta { border-radius: 26px; }
+html[data-estilo="cristal"] .modal {
+  background: var(--cristal-fuerte); border: 1px solid rgba(255,255,255,0.75); border-radius: 28px;
+  box-shadow: 0 30px 80px rgba(50, 30, 110, 0.3), var(--brillo);
+  backdrop-filter: var(--desenfoque); -webkit-backdrop-filter: var(--desenfoque);
+}
+html[data-estilo="cristal"] .modal-fondo { background: rgba(40, 26, 80, 0.32); }
+html[data-estilo="cristal"] .login-caja { border-top: 1px solid rgba(255,255,255,0.9); }
+html[data-estilo="cristal"] #login {
+  background:
+    radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--rojo) 55%, transparent), transparent 40%),
+    radial-gradient(circle at 80% 30%, color-mix(in srgb, #5ad1ff 55%, transparent), transparent 40%),
+    radial-gradient(circle at 50% 90%, color-mix(in srgb, var(--amarillo) 50%, transparent), transparent 45%),
+    linear-gradient(145deg, var(--cafe), var(--cafe-medio));
+}
+
+/* Menú lateral y barra superior: vidrio de color */
+html[data-estilo="cristal"] .lateral,
+html[data-estilo="cristal"] .barra-sup {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--cafe) 78%, transparent), color-mix(in srgb, var(--cafe-medio) 72%, transparent));
+  backdrop-filter: var(--desenfoque); -webkit-backdrop-filter: var(--desenfoque);
+  box-shadow: 8px 0 32px rgba(50, 30, 110, 0.22), inset -1px 0 0 rgba(255,255,255,0.35);
+}
+html[data-estilo="cristal"] nav#nav a:hover { background: rgba(255,255,255,0.16); }
+html[data-estilo="cristal"] nav#nav a.activo {
+  background: linear-gradient(135deg, rgba(255,255,255,0.95), color-mix(in srgb, var(--amarillo) 45%, white));
+  color: var(--cafe); box-shadow: 0 8px 22px rgba(255,255,255,0.28), var(--brillo);
+}
+html[data-estilo="cristal"] .logo { color: #fff; text-shadow: 0 1px 10px rgba(255,255,255,0.45); }
+
+/* Botones tipo gelatina: brillo arriba, volumen abajo */
+html[data-estilo="cristal"] button,
+html[data-estilo="cristal"] .btn {
+  background: var(--cristal-fuerte); border: 1px solid rgba(255,255,255,0.8); border-radius: 14px;
+  box-shadow: 0 8px 20px rgba(76, 52, 150, 0.12), var(--brillo);
+}
+html[data-estilo="cristal"] button:hover:not(:disabled),
+html[data-estilo="cristal"] .btn:hover:not(:disabled) {
+  box-shadow: 0 12px 28px rgba(76, 52, 150, 0.2), 0 0 0 3px rgba(255,255,255,0.45), var(--brillo);
+  filter: brightness(1.04);
+}
+html[data-estilo="cristal"] .primario,
+html[data-estilo="cristal"] .exito,
+html[data-estilo="cristal"] .aviso {
+  position: relative; overflow: hidden; border-color: rgba(255,255,255,0.55); color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.18);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--rojo) 35%, transparent),
+              inset 0 2px 6px rgba(255,255,255,0.55), inset 0 -6px 12px rgba(0,0,0,0.12);
+}
+html[data-estilo="cristal"] .primario { background: linear-gradient(135deg, var(--rojo), color-mix(in srgb, var(--rojo) 45%, var(--amarillo))); }
+html[data-estilo="cristal"] .exito {
+  background: linear-gradient(135deg, #22d48a, #16b3a0);
+  box-shadow: 0 10px 24px rgba(22, 179, 140, 0.32), inset 0 2px 6px rgba(255,255,255,0.55), inset 0 -6px 12px rgba(0,0,0,0.12);
+}
+html[data-estilo="cristal"] .aviso { background: linear-gradient(135deg, var(--amarillo), color-mix(in srgb, var(--amarillo) 55%, white)); color: var(--cafe); text-shadow: none; }
+/* Reflejo de luz que cruza el botón al pasar el mouse */
+html[data-estilo="cristal"] .primario::after,
+html[data-estilo="cristal"] .exito::after {
+  content: ""; position: absolute; top: 0; left: -60%; width: 45%; height: 100%; pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,0.55), transparent);
+  transform: skewX(-18deg); transition: left .55s ease;
+}
+html[data-estilo="cristal"] .primario:hover:not(:disabled)::after,
+html[data-estilo="cristal"] .exito:hover:not(:disabled)::after { left: 120%; }
+html[data-estilo="cristal"] .peligro { background: color-mix(in srgb, var(--rojo) 12%, rgba(255,255,255,0.6)); color: var(--rojo-osc); }
+html[data-estilo="cristal"] .lateral .plegar,
+html[data-estilo="cristal"] .barra-sup .hamburguesa,
+html[data-estilo="cristal"] .usuario button { background: rgba(255,255,255,0.16); border-color: rgba(255,255,255,0.3); color: #fff; box-shadow: none; }
+html[data-estilo="cristal"] .usuario button { background: transparent; border: 0; }
+
+/* Campos */
+html[data-estilo="cristal"] input,
+html[data-estilo="cristal"] select,
+html[data-estilo="cristal"] textarea {
+  background: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.85); border-radius: 14px;
+  box-shadow: inset 0 2px 4px rgba(76, 52, 150, 0.06);
+}
+html[data-estilo="cristal"] input:focus,
+html[data-estilo="cristal"] select:focus,
+html[data-estilo="cristal"] textarea:focus {
+  background: rgba(255,255,255,0.85); border-color: color-mix(in srgb, var(--rojo) 55%, white);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--rojo) 16%, transparent);
+}
+html[data-estilo="cristal"] input[type=checkbox], html[data-estilo="cristal"] input[type=radio] { box-shadow: none; }
+
+/* Mesas, productos y categorías: translúcidos sin desenfoque (son muchos) */
+html[data-estilo="cristal"] .mesa,
+html[data-estilo="cristal"] .prod {
+  background: linear-gradient(160deg, rgba(255,255,255,0.78), rgba(255,255,255,0.4));
+  border: 1px solid rgba(255,255,255,0.85); border-radius: 22px;
+  box-shadow: 0 10px 26px rgba(76, 52, 150, 0.12), var(--brillo);
+}
+html[data-estilo="cristal"] .mesa:hover,
+html[data-estilo="cristal"] .prod:hover {
+  background: linear-gradient(160deg, rgba(255,255,255,0.95), color-mix(in srgb, var(--amarillo) 14%, rgba(255,255,255,0.6)));
+  box-shadow: 0 16px 34px rgba(76, 52, 150, 0.2), 0 0 0 3px rgba(255,255,255,0.5), var(--brillo);
+}
+html[data-estilo="cristal"] .mesa.ocupada {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--rojo) 16%, rgba(255,255,255,0.8)), color-mix(in srgb, var(--rojo) 8%, rgba(255,255,255,0.4)));
+  border-color: color-mix(in srgb, var(--rojo) 35%, white);
+}
+html[data-estilo="cristal"] .mesa.alerta-pedido,
+html[data-estilo="cristal"] .tarjeta.alerta-pedido { border-color: color-mix(in srgb, var(--rojo) 80%, transparent); }
+html[data-estilo="cristal"] .cats button { background: rgba(255,255,255,0.5); }
+html[data-estilo="cristal"] .cats button.activo,
+html[data-estilo="cristal"] .kpi.destacado {
+  background: linear-gradient(135deg, var(--cafe), var(--rojo) 60%, var(--amarillo));
+  color: #fff; border-color: rgba(255,255,255,0.55);
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--rojo) 30%, transparent), inset 0 2px 6px rgba(255,255,255,0.45);
+}
+html[data-estilo="cristal"] .kpi.destacado .t, html[data-estilo="cristal"] .kpi.destacado .s { color: rgba(255,255,255,0.88); }
+html[data-estilo="cristal"] .tabs button.activo { background: rgba(255,255,255,0.7); }
+html[data-estilo="cristal"] th { border-bottom-color: rgba(255,255,255,0.8); }
+html[data-estilo="cristal"] .toast { backdrop-filter: var(--desenfoque); -webkit-backdrop-filter: var(--desenfoque); border-color: rgba(255,255,255,0.35); }
+
+/* Muestra del tema en Ajustes: iridiscente */
+.tema-muestra.muestra-cristal {
+  background: linear-gradient(120deg, #c9b6ff, #ffc1e3, #b5ecff, #d8ffe9) !important;
+  box-shadow: inset 0 2px 6px rgba(255,255,255,0.9), inset 0 -4px 10px rgba(120, 90, 200, 0.18);
+  border: 1px solid rgba(255,255,255,0.9);
+}
