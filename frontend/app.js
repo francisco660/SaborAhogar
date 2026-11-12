@@ -1,5 +1,5 @@
 'use strict';
-// POS "Con Sabor a Hogar" — aplicación web sin compilación
+// Ventix: punto de venta para restaurantes y negocios — aplicación web sin compilación
 
 // ═══ Utilidades ══════════════════════════════════════════════════════════════
 const $ = (s, el = document) => el.querySelector(s);
@@ -546,7 +546,7 @@ function pintarMarca() {
   $$('#app .logo').forEach((l) => {
     l.innerHTML = `${icono ? `<span class="icono-marca">${esc(icono)}</span>` : ''}${esc(partes.join(' '))}${ultima ? ` <small>${esc(ultima)}</small>` : ''}`;
   });
-  document.title = `${nombre} · POS`;
+  document.title = `${nombre} · Ventix`;
 }
 
 window.addEventListener('hashchange', navegar);

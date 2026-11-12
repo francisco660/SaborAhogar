@@ -1,6 +1,7 @@
-# POS "Con Sabor a Hogar"
+# Ventix · Punto de venta
 
-Sistema para el restaurante **Con Sabor a Hogar** (Cra 72 cl 20f -4, París – Bello):
+Punto de venta para restaurantes y negocios en general (modo **Restaurante** o
+**Tienda** en Ajustes). Nació en el restaurante **Con Sabor a Hogar** (Cra 72 cl 20f -4, París – Bello):
 pedidos en mesa, para llevar y domicilio; pantalla de cocina; inventario con
 descuento automático por receta; gastos y compras; cierre de caja diario y
 reporte de utilidades.

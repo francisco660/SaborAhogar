@@ -1,7 +1,7 @@
 {
   "name": "pos-restaurante-server",
   "version": "1.0.0",
-  "description": "POS Con Sabor a Hogar: pedidos, cocina, inventario, gastos y caja",
+  "description": "Ventix: punto de venta para restaurantes y negocios (pedidos, cocina, inventario, gastos y caja)",
   "type": "module",
   "private": true,
   "engines": { "node": ">=20" },

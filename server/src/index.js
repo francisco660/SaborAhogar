@@ -1,4 +1,4 @@
-// Servidor del POS "Con Sabor a Hogar"
+// Servidor de Ventix (punto de venta)
 // - Sirve la aplicación web (carpeta /frontend)
 // - /api/...  pedidos, cocina, caja, inventario, gastos, reportes
 import 'dotenv/config';
