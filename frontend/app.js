@@ -22,6 +22,11 @@ const minutos = (d) => Math.max(0, Math.floor((Date.now() - new Date(d)) / 60000
 const UNIDAD = { g: 'g', ml: 'ml', und: 'und' };
 const ROL = { admin: 'Administrador', cajero: 'Caja', mesero: 'Mesero', cocina: 'Cocina', domiciliario: 'Domiciliario' };
 const ESTADO_ITEM = { pendiente: 'Sin enviar', en_cocina: 'En cocina', preparando: 'En preparación', listo: 'Listo', entregado: 'Entregado', anulado: 'Anulado' };
+// Tipo de negocio (ajuste tipo_negocio): 'restaurante' (mesas y cocina) o 'tienda' (venta directa de mostrador)
+const TIPO_NEGOCIO = { restaurante: 'Restaurante (mesas, cocina, domicilios)', tienda: 'Tienda / negocio general (venta directa, código de barras)' };
+const modoTienda = () => S.ajustes?.tipo_negocio === 'tienda';
+// Palabras que cambian según el tipo de negocio
+const T = (restaurante, tienda) => (modoTienda() ? tienda : restaurante);
 const TIPO = { MESA: 'Mesa', LLEVAR: 'Para llevar', DOMICILIO: 'Domicilio' };
 const MEDIOS = ['EFECTIVO', 'NEQUI', 'DAVIPLATA', 'TARJETA', 'TRANSFERENCIA'];
 const MEDIOS_COBRO = [...MEDIOS, 'FIADO'];
@@ -454,6 +459,19 @@ const ICONO_NAV = { pedidos: '🧾', cocina: '🍳', domicilios: '🛵', caja: '
 // Vistas por rol; "superadmin" es solo para quien administra todos los restaurantes
 const puedeVer = (roles) => (roles === 'superadmin' ? !!S.usuario?.superadmin : tiene(...roles));
 const PERMISO_VISTA = { pedido: ['cajero', 'mesero'] };
+// En una tienda no hay cocina y los nombres del menú cambian
+const NAV_TIENDA = { pedidos: 'Ventas', menu: 'Productos' };
+const ESTADO_ITEM_TIENDA = { pendiente: 'Sin cobrar', en_cocina: 'Registrado', preparando: 'Registrado', listo: 'Listo', entregado: 'Entregado' };
+const ESTADO_ITEM_RESTAURANTE = { ...ESTADO_ITEM };
+function pintarNav() {
+  Object.assign(ESTADO_ITEM, modoTienda() ? ESTADO_ITEM_TIENDA : ESTADO_ITEM_RESTAURANTE);
+  $('#nav').innerHTML = NAV.filter(([v, , r]) => puedeVer(r) && !(modoTienda() && v === 'cocina'))
+    .map(([v, t]) => {
+      const titulo = modoTienda() ? NAV_TIENDA[v] || t : t;
+      return `<a href="#${v}" data-v="${v}" title="${titulo}"><span class="ico">${ICONO_NAV[v] || '•'}</span><span class="txt">${titulo}</span></a>`;
+    }).join('');
+  $$('#nav a').forEach((a) => a.classList.toggle('activo', a.dataset.v === (S.vista?.nombre === 'pedido' ? 'pedidos' : S.vista?.nombre)));
+}
 
 function inicioRol() {
   return { cocina: 'cocina', domiciliario: 'domicilios' }[S.usuario.rol] || 'pedidos';
@@ -502,9 +520,8 @@ async function iniciar() {
   $('#app').hidden = false;
   $('#u-nombre').textContent = S.usuario.nombre;
   $('#u-rol').textContent = ROL[S.usuario.rol] + (S.usuario.superadmin && S.usuario.restaurante ? ` · ${S.usuario.restaurante}` : '');
-  $('#nav').innerHTML = NAV.filter(([, , r]) => puedeVer(r))
-    .map(([v, t]) => `<a href="#${v}" data-v="${v}" title="${t}"><span class="ico">${ICONO_NAV[v] || '•'}</span><span class="txt">${t}</span></a>`).join('');
   try { S.ajustes = await api('/ajustes'); } catch { /* sigue */ }
+  pintarNav();
   aplicarTema(temaDe(S.ajustes));
   almacen.guardar('pos_tema', temaDe(S.ajustes));
   pintarMarca();
@@ -670,7 +687,7 @@ const productosMenu = () => S.menu.flatMap((c) => c.productos);
 
 // ═══ VISTA: Pedidos (mesas y pedidos abiertos) ═══════════════════════════════
 async function vistaPedidos(el) {
-  const [mesas, pedidos] = await Promise.all([api('/mesas'), api('/pedidos?estado=abierto')]);
+  const [mesas, pedidos] = await Promise.all([modoTienda() ? [] : api('/mesas'), api('/pedidos?estado=abierto')]);
   const otros = pedidos.filter((p) => p.tipo !== 'MESA');
   const resumenCocina = (p) => {
     const c = {};
@@ -680,13 +697,14 @@ async function vistaPedidos(el) {
   };
   el.innerHTML = `
     <div class="titulo-vista">
-      <h2>Pedidos</h2>
+      <h2>${T('Pedidos', 'Ventas')}</h2>
       <div class="fila">
-        <a class="btn" href="#pedido/nuevo/LLEVAR">+ Para llevar</a>
-        <a class="btn primario" href="#pedido/nuevo/DOMICILIO">+ Domicilio</a>
+        ${modoTienda()
+          ? '<a class="btn primario" href="#pedido/nuevo/LLEVAR">+ Nueva venta</a><a class="btn" href="#pedido/nuevo/DOMICILIO">+ Domicilio</a>'
+          : '<a class="btn" href="#pedido/nuevo/LLEVAR">+ Para llevar</a><a class="btn primario" href="#pedido/nuevo/DOMICILIO">+ Domicilio</a>'}
       </div>
     </div>
-    <div class="mesas">
+    <div class="mesas" ${modoTienda() ? 'style="display:none"' : ''}>
       ${mesas.map((m) => `
         <button class="mesa ${m.pedido_id ? 'ocupada' : ''} ${m.listos ? 'alerta-pedido' : ''}" data-acc="mesa" data-id="${m.id}" data-pedido="${m.pedido_id || ''}">
           <span class="nom">${esc(m.nombre)}</span>
@@ -698,15 +716,15 @@ async function vistaPedidos(el) {
         </button>`).join('')}
     </div>
     <div class="seccion">
-      <h3>Para llevar y domicilios</h3>
+      <h3>${T('Para llevar y domicilios', 'Ventas pendientes de cobro y domicilios')}</h3>
       ${otros.length ? `<div class="lista-pedidos">${otros.map((p) => `
         <button class="tarjeta pedido-card ${p.items.some((i) => i.estado === 'listo') ? 'alerta-pedido' : ''}" data-acc="ver" data-id="${p.id}">
           <div class="entre"><b>#${p.numero} · ${TIPO[p.tipo]}</b><b>${pesos(p.total)}</b></div>
           <div class="suave chico">${esc(p.cliente || p.nombre_cliente || '')} ${p.barrio ? '· ' + esc(p.barrio) : ''} · ${hora(p.creado_en)}</div>
           <div style="margin-top:.4rem">${resumenCocina(p) || '<span class="suave chico">Sin ítems</span>'}</div>
-        </button>`).join('')}</div>` : '<p class="vacio">No hay pedidos para llevar ni domicilios abiertos.</p>'}
+        </button>`).join('')}</div>` : `<p class="vacio">${T('No hay pedidos para llevar ni domicilios abiertos.', 'No hay ventas pendientes. Toque <b>Nueva venta</b> para empezar.')}</p>`}
     </div>
-    ${tiene('cajero') ? '<div class="seccion"><a href="#pedidos" data-acc="hoy">Ver todos los pedidos de hoy →</a></div><div id="hoy"></div>' : ''}`;
+    ${tiene('cajero') ? `<div class="seccion"><a href="#pedidos" data-acc="hoy">Ver ${T('todos los pedidos', 'todas las ventas')} de hoy →</a></div><div id="hoy"></div>` : ''}`;
 
   S.acc = {
     mesa: (b) => { location.hash = b.dataset.pedido ? `pedido/${b.dataset.pedido}` : `pedido/nuevo/MESA/${b.dataset.id}`; },
@@ -739,8 +757,8 @@ async function vistaPedido(el, id, tipo, mesaId) {
     <div class="pos">
       <section>
         <div class="entre" style="margin-bottom:.6rem">
-          <a href="#pedidos">← Pedidos</a>
-          <input id="buscar" type="search" name="buscar-plato" placeholder="Buscar plato…" style="max-width:260px" autocomplete="off" value="">
+          <a href="#pedidos">← ${T('Pedidos', 'Ventas')}</a>
+          <input id="buscar" type="search" name="buscar-plato" placeholder="${T('Buscar plato…', 'Buscar o escanear código…')}" style="max-width:260px" autocomplete="off" value="" ${modoTienda() ? 'autofocus' : ''}>
         </div>
         <div class="cats" id="cats"></div>
         <div class="prods" id="prods"></div>
@@ -751,9 +769,24 @@ async function vistaPedido(el, id, tipo, mesaId) {
   if (id === 'nuevo' && tipo === 'MESA') S.mesas = await api('/mesas');
   pintarProductos();
   await pintarCuenta();
+  // Lector de código de barras: escribe el código y manda Enter
+  $('#buscar').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const q = e.target.value.trim();
+    const p = q && productosMenu().find((x) => x.codigo_barras === q);
+    if (!p) return;
+    e.preventDefault();
+    e.target.value = '';
+    pintarProductos();
+    agregarProducto(p);
+  });
 
   S.acc = {
     cat: (b) => { S.catActiva = Number(b.dataset.id); $('#buscar').value = ''; pintarProductos(); },
+    cobrarVenta: () => modalCobro({ id: null, numero: 'nueva', tipo: 'LLEVAR', total: totalCarrito(), cliente_id: null }, {
+      venta: () => ({ nombre_cliente: S.nuevo.nombre_cliente, nota: S.nuevo.nota,
+        items: S.carrito.map((l) => ({ producto_id: l.producto_id, cantidad: l.cantidad, nota: l.nota, opciones: l.opciones })) })
+    }),
     prod: (b) => agregarProducto(productosMenu().find((p) => p.id === Number(b.dataset.id))),
     mas: (b) => { S.carrito[b.dataset.i].cantidad++; pintarCuenta(); },
     menos: (b) => {
@@ -826,7 +859,7 @@ function pintarProductos() {
   $('#cats').innerHTML = S.menu.map((c) =>
     `<button class="peq ${!q && c.id === S.catActiva ? 'activo' : ''}" data-acc="cat" data-id="${c.id}">${esc(c.nombre)}</button>`).join('');
   const lista = q
-    ? productosMenu().filter((p) => p.nombre.toLowerCase().includes(q))
+    ? productosMenu().filter((p) => p.nombre.toLowerCase().includes(q) || (p.codigo_barras && p.codigo_barras.includes(q)))
     : S.menu.find((c) => c.id === S.catActiva)?.productos || [];
   $('#prods').innerHTML = lista.map((p) => `
     <button class="prod" data-acc="prod" data-id="${p.id}">
@@ -835,7 +868,7 @@ function pintarProductos() {
       <span class="precio">${pesos(p.precio)}</span>
     </button>`).join('') || `<p class="vacio">${
       !S.menu.some((c) => c.productos.length)
-        ? `Este restaurante todavía no tiene productos.${tiene() ? ' Créelos en la pestaña <a href="#menu">Menú</a>.' : ' Pida al administrador que cree el menú.'}`
+        ? `Este ${T('restaurante', 'negocio')} todavía no tiene productos.${tiene() ? ` Créelos en la pestaña <a href="#menu">${T('Menú', 'Productos')}</a>.` : ' Pida al administrador que los cree.'}`
         : q ? `No hay productos que coincidan con "${esc(q)}".` : 'No hay productos en esta categoría.'}</p>`;
 }
 
@@ -860,7 +893,7 @@ function agregarProducto(p) {
         </fieldset>`).join('')}
       <div class="campos">
         <div><label>Cantidad</label><input name="cantidad" type="number" min="1" value="1" inputmode="numeric"></div>
-        <div style="grid-column: span 2"><label>Nota para cocina</label><input name="nota" placeholder="Ej: sin cebolla, huevos pericos"></div>
+        <div style="grid-column: span 2"><label>${T('Nota para cocina', 'Nota')}</label><input name="nota" placeholder="${T('Ej: sin cebolla, huevos pericos', 'Ej: color rojo, talla M')}"></div>
       </div>
       <div class="pie"><button type="button" data-acc="cerrar">Cancelar</button><button class="primario">Agregar</button></div>
     </form>`, {
@@ -969,13 +1002,13 @@ async function pintarCuenta() {
       ${p.nota ? `<div class="chico"><b>Nota:</b> ${esc(p.nota)}</div>` : ''}`;
   } else {
     const n = S.nuevo;
-    cabecera = `<h3>Nuevo · ${TIPO[n.tipo]}</h3>`;
+    cabecera = `<h3>${modoTienda() && n.tipo === 'LLEVAR' ? 'Nueva venta' : `Nuevo · ${TIPO[n.tipo]}`}</h3>`;
     if (n.tipo === 'MESA') {
       cabecera += `<div class="campo"><label>Mesa</label><select data-campo="mesa_id">
         ${S.mesas.map((m) => `<option value="${m.id}" ${m.id === n.mesa_id ? 'selected' : ''} ${m.pedido_id ? 'disabled' : ''}>${esc(m.nombre)}${m.pedido_id ? ' (ocupada)' : ''}</option>`).join('')}
       </select></div>`;
     } else if (n.tipo === 'LLEVAR') {
-      cabecera += `<div class="campo"><label>A nombre de</label><input data-campo="nombre_cliente" value="${esc(n.nombre_cliente || '')}"></div>`;
+      cabecera += `<div class="campo"><label>${T('A nombre de', 'Cliente (opcional)')}</label><input data-campo="nombre_cliente" value="${esc(n.nombre_cliente || '')}"></div>`;
     } else {
       const cl = n.cliente;
       cabecera += `<div class="campos">
@@ -986,7 +1019,7 @@ async function pintarCuenta() {
         <div><label>Costo envío</label><input data-dinero data-campo="costo_envio" type="number" min="0" step="500" value="${esc(n.costo_envio)}"></div>
       </div>`;
     }
-    cabecera += `<div class="campo" style="margin-top:.6rem"><label>Nota del pedido</label><input data-campo="nota" value="${esc(n.nota || '')}"></div>`;
+    cabecera += `<div class="campo" style="margin-top:.6rem"><label>${T('Nota del pedido', 'Nota')}</label><input data-campo="nota" value="${esc(n.nota || '')}"></div>`;
   }
 
   const lineaExistente = (i) => {
@@ -1018,15 +1051,22 @@ async function pintarCuenta() {
   </div>`;
 
   const pendientes = p?.items.some((i) => i.estado === 'pendiente');
+  const cuantos = S.carrito.reduce((s, l) => s + l.cantidad, 0);
   let acciones = '';
   if (editable) {
-    if (S.carrito.length) acciones += `<button class="primario" style="width:100%" data-acc="enviar">Enviar a cocina (${S.carrito.reduce((s, l) => s + l.cantidad, 0)})</button>`;
+    if (modoTienda()) {
+      // Tienda: se cobra de una desde el mostrador; guardar sin cobrar es la excepción (domicilios, "ahora vuelvo")
+      if (!p && S.carrito.length && S.nuevo.tipo === 'LLEVAR' && tiene('cajero')) {
+        acciones += `<button class="exito" style="width:100%" data-acc="cobrarVenta">Cobrar ${pesos(totalCarrito())}</button>`;
+      }
+      if (S.carrito.length) acciones += `<button class="${!p && S.nuevo.tipo === 'LLEVAR' && tiene('cajero') ? '' : 'primario'}" style="width:100%;margin-top:.4rem" data-acc="enviar">Guardar sin cobrar (${cuantos})</button>`;
+    } else if (S.carrito.length) acciones += `<button class="primario" style="width:100%" data-acc="enviar">Enviar a cocina (${cuantos})</button>`;
     else if (pendientes) acciones += `<button class="primario" style="width:100%" data-acc="enviarPendientes">Enviar pendientes a cocina</button>`;
   }
   if (p) {
     acciones += '<div class="fila" style="margin-top:.5rem">';
     if (p.estado === 'abierto' && tiene('cajero') && p.total > 0 && !S.carrito.length) acciones += `<button class="exito crece" data-acc="cobrar">Cobrar ${pesos(p.total)}</button>`;
-    acciones += `<button class="peq" data-acc="imprimirCuenta">🧾 Cuenta</button><button class="peq" data-acc="imprimirComanda">🍳 Comanda</button>`;
+    acciones += `<button class="peq" data-acc="imprimirCuenta">🧾 Cuenta</button>${modoTienda() ? '' : '<button class="peq" data-acc="imprimirComanda">🍳 Comanda</button>'}`;
     if (p.estado === 'abierto' && tiene('cajero')) acciones += `<button class="peq peligro" data-acc="anular">Anular pedido</button>`;
     acciones += '</div>';
     if (p.tipo === 'DOMICILIO' && p.estado !== 'anulado' && tiene('cajero')) {
@@ -1056,9 +1096,9 @@ async function pintarCuenta() {
 
   c.innerHTML = `
     ${cabecera}
-    ${p?.items.length ? `<div class="etiqueta-seccion">En el pedido</div>${p.items.map(lineaExistente).join('')}` : ''}
-    ${S.carrito.length ? `<div class="etiqueta-seccion">Por enviar</div>${S.carrito.map(lineaCarrito).join('')}` : ''}
-    ${!p?.items.length && !S.carrito.length ? '<p class="vacio">Toque los platos del menú para agregarlos.</p>' : ''}
+    ${p?.items.length ? `<div class="etiqueta-seccion">${T('En el pedido', 'Registrado')}</div>${p.items.map(lineaExistente).join('')}` : ''}
+    ${S.carrito.length ? `<div class="etiqueta-seccion">${T('Por enviar', 'Productos')}</div>${S.carrito.map(lineaCarrito).join('')}` : ''}
+    ${!p?.items.length && !S.carrito.length ? `<p class="vacio">${T('Toque los platos del menú para agregarlos.', 'Toque los productos o escanee su código de barras.')}</p>` : ''}
     ${p?.costo_envio > 0 ? `<div class="subtotal"><span>Domicilio</span><span>${pesos(p.costo_envio)}</span></div>` : ''}
     ${!p && S.nuevo.tipo === 'DOMICILIO' ? '<div class="subtotal"><span>Domicilio</span><span id="envio-nuevo"></span></div>' : ''}
     <div class="total"><span>Total</span><span id="total-cuenta"></span></div>
@@ -1072,7 +1112,7 @@ async function enviarPedido() {
   if (S.pedido) {
     await api(`/pedidos/${S.pedido.id}/items`, { method: 'POST', body: { items, enviar: true } });
     S.carrito = [];
-    toast('Enviado a cocina', 'ok');
+    toast(T('Enviado a cocina', 'Guardado'), 'ok');
     return pintarCuenta();
   }
   const n = S.nuevo;
@@ -1083,16 +1123,17 @@ async function enviarPedido() {
   });
   S.carrito = [];
   S.carritoClave = String(p.id);
-  toast(`Pedido #${p.numero} enviado a cocina`, 'ok');
+  toast(T(`Pedido #${p.numero} enviado a cocina`, `Venta #${p.numero} guardada sin cobrar`), 'ok');
   location.hash = `pedido/${p.id}`;
 }
 
-function modalCobro(p) {
+// p: pedido abierto. venta: función que arma la venta directa (productos del carrito) cuando aún no existe el pedido
+function modalCobro(p, { venta = null } = {}) {
   const puedeLiquidar = p.tipo === 'DOMICILIO' && p.domiciliario_id;
   // Cliente al que se le fía (por defecto, el del domicilio)
   let fiadoA = p.cliente_id ? { id: p.cliente_id, nombre: p.cliente, telefono: p.telefono } : null;
   const modal = abrirModal(`
-    ${cabeceraModal(`Cobrar pedido #${p.numero}`)}
+    ${cabeceraModal(venta ? 'Cobrar venta' : `Cobrar pedido #${p.numero}`)}
     <form>
       <div class="total" style="border-top:0;margin-top:0"><span>Total</span><span>${pesos(p.total)}</span></div>
       ${puedeLiquidar ? `<label class="check" style="margin-bottom:.6rem"><input type="checkbox" name="liquidar">
@@ -1150,16 +1191,22 @@ function modalCobro(p) {
         body.fiado_cliente_id = fiadoA.id;
       }
       if (fe?.pidio()) body.factura = { cliente_fiscal_id: await fe.guardar() };
-      const r = await api(`/pedidos/${p.id}/cobrar`, { method: 'POST', body });
+      const r = venta
+        ? await api('/pedidos/venta', { method: 'POST', body: { ...venta(), ...body } })
+        : await api(`/pedidos/${p.id}/cobrar`, { method: 'POST', body });
       cerrar();
-      toast(`Pedido #${p.numero} cobrado`, 'ok');
+      toast(`${T('Pedido', 'Venta')} #${r.numero} cobrad${T('o', 'a')}`, 'ok');
       if (r.aviso_fe) toast(r.aviso_fe, 'error', 9000);
       S.pedido = r;
       const doc = documentoVigente(r);
-      location.hash = 'pedidos';
+      if (venta) {
+        // Queda lista la pantalla para la siguiente venta
+        S.carrito = []; S.carritoClave = null;
+        navegar();
+      } else location.hash = 'pedidos';
       // Vista previa del recibo (o del documento electrónico) lista para imprimir
       if (doc) await imprimirDocumento(doc.id);
-      else imprimir(ticketPedido(r, 'cuenta'), `Recibo · pedido #${r.numero}`);
+      else imprimir(ticketPedido(r, 'cuenta'), `Recibo · ${T('pedido', 'venta')} #${r.numero}`);
     }
   });
   const fe = feActiva() ? controlFactura(modal.m) : null;
@@ -1682,9 +1729,10 @@ async function vistaMenu(el) {
   const filaProducto = (p) => {
     const pc = p.precio ? (p.costo_base / p.precio) * 100 : NaN;
     const grupos = p.grupos.map((g) => `${esc(g.nombre)} (${g.opciones.filter((o) => o.activo).length})`).join(' · ');
-    return `<tr class="${p.activo ? '' : 'suave'}" data-buscar="${esc((p.nombre + ' ' + (p.descripcion || '')).toLowerCase())}">
+    return `<tr class="${p.activo ? '' : 'suave'}" data-buscar="${esc((p.nombre + ' ' + (p.descripcion || '') + ' ' + (p.codigo_barras || '')).toLowerCase())}">
       <td><button type="button" class="enlace" data-acc="editarProducto" data-id="${p.id}"><strong>${esc(p.nombre)}</strong></button>
         ${p.activo ? '' : '<span class="chip anulado">inactivo</span>'}
+        ${p.codigo_barras ? `<span class="chico suave" title="Código de barras">▮ ${esc(p.codigo_barras)}</span>` : ''}
         ${p.descripcion ? `<div class="chico suave">${esc(p.descripcion)}</div>` : ''}</td>
       <td class="chico">${grupos || '<span class="suave">—</span>'}</td>
       <td class="num">${pesos(p.precio)}</td>
@@ -1699,17 +1747,17 @@ async function vistaMenu(el) {
   };
 
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Menú</h2>
+    <div class="titulo-vista"><h2>${T('Menú', 'Productos')}</h2>
       <div class="fila">
         <button data-acc="nuevaCategoria">+ Categoría</button>
         <button class="primario" data-acc="nuevoProducto" ${menu.length ? '' : 'disabled title="Cree primero una categoría"'}>+ Producto</button>
       </div>
     </div>
-    ${delDia.map(tarjetaDia).join('')}
+    ${modoTienda() ? '' : delDia.map(tarjetaDia).join('')}
     <div class="tarjeta">
       <div class="entre menu-cabecera">
-        <h3>Carta <span class="suave chico">${menu.length} categorías · ${total} productos</span></h3>
-        <input id="menu-buscar" type="search" placeholder="Buscar producto…" autocomplete="off" style="max-width:260px">
+        <h3>${T('Carta', 'Lista de productos')} <span class="suave chico">${menu.length} categorías · ${total} productos</span></h3>
+        <input id="menu-buscar" type="search" placeholder="${T('Buscar producto…', 'Buscar nombre o código…')}" autocomplete="off" style="max-width:260px">
       </div>
       ${menu.length ? menu.map((c) => `
         <section class="menu-cat" data-cat="${c.id}">
@@ -1727,9 +1775,9 @@ async function vistaMenu(el) {
             <tbody>${c.productos.map(filaProducto).join('')}</tbody></table></div>`
           : `<p class="suave chico">Sin productos. <button type="button" class="enlace" data-acc="productoEnCategoria" data-id="${c.id}">Agregar el primero</button></p>`}
         </section>`).join('')
-      : `<div class="vacio"><p>Este restaurante todavía no tiene menú.</p>
+      : `<div class="vacio"><p>Este ${T('restaurante todavía no tiene menú', 'negocio todavía no tiene productos')}.</p>
           <button class="primario" data-acc="nuevaCategoria">+ Crear la primera categoría</button></div>`}
-      <p class="chico suave" style="margin-top:.8rem">El <b>costo</b> sale de la receta de cada producto y del costo promedio de sus insumos. En rojo, los que cuestan más del 40% de su precio.</p>
+      <p class="chico suave" style="margin-top:.8rem">El <b>costo</b> sale de la ${T('receta de cada producto y del costo promedio de sus insumos', 'receta del producto (qué insumos del inventario gasta) y del costo promedio de esos insumos')}. En rojo, los que cuestan más del 40% de su precio.</p>
     </div>`;
 
   const producto = (id) => menu.flatMap((c) => c.productos).find((p) => p.id === Number(id));
@@ -1821,14 +1869,15 @@ function modalProducto(p, categoriaId) {
           <div><label>Orden</label><input name="orden" type="number" min="0" value="${prod?.orden ?? ''}" placeholder="Al final"></div>
           <div><label>Impuesto (incluido en el precio)</label><select name="impuesto">${IMPUESTOS.map(([k, t]) =>
             `<option value="${k}" ${k === `${prod?.impuesto_tipo ?? 'INC'}|${Number(prod?.impuesto_tasa ?? 8)}` ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-          <div style="grid-column: 1 / -1"><label>Descripción (lo que incluye)</label>
-            <textarea name="descripcion" placeholder="Ej: Arroz, ensalada, papas y jugo natural">${esc(prod?.descripcion || '')}</textarea></div>
+          <div><label>Código de barras</label><input name="codigo_barras" value="${esc(prod?.codigo_barras || '')}" placeholder="Escanee o escriba el código" autocomplete="off" inputmode="numeric"></div>
+          <div style="grid-column: 1 / -1"><label>${T('Descripción (lo que incluye)', 'Descripción')}</label>
+            <textarea name="descripcion" placeholder="${T('Ej: Arroz, ensalada, papas y jugo natural', 'Ej: presentación, marca, tamaño')}">${esc(prod?.descripcion || '')}</textarea></div>
           ${prod ? `<label class="check" style="grid-column: 1 / -1"><input type="checkbox" name="activo" ${prod.activo ? 'checked' : ''}> Activo (se puede vender)</label>` : ''}
         </div>
         <div class="pie"><button class="primario">${prod ? 'Guardar datos' : 'Crear producto'}</button></div>
       </form>`;
     if (!prod) return `${cabeceraModal('Nuevo producto')}${datos}
-      <p class="chico suave">Después de crearlo podrá agregarle opciones para elegir (proteína, bebida, término…) y su receta.</p>`;
+      <p class="chico suave">Después de crearlo podrá agregarle opciones para elegir (${T('proteína, bebida, término', 'talla, color, sabor')}…) y su receta.</p>`;
 
     // Opciones de los otros grupos del plato que pueden mostrar este grupo (ej: Término si eligen "Carne de res")
     const condicionPosible = (g) => prod.grupos.filter((x) => x.id !== g.id && !x.mostrar_si_opcion)
@@ -1872,7 +1921,7 @@ function modalProducto(p, categoriaId) {
       </div>
       <div class="seccion-modal">
         <h4>Opciones para elegir</h4>
-        <p class="chico suave">Grupos que el mesero debe escoger al pedir (ej: <b>Proteína</b>, <b>Bebida</b>, <b>Término</b>). Mín 1 y Máx 1 = escoger una obligatoria. Mín 0 = opcional.</p>
+        <p class="chico suave">Grupos que se escogen al ${T('pedir (ej: <b>Proteína</b>, <b>Bebida</b>, <b>Término</b>)', 'vender (ej: <b>Talla</b>, <b>Color</b>, <b>Sabor</b>)')}. Mín 1 y Máx 1 = escoger una obligatoria. Mín 0 = opcional.</p>
         ${grupos || '<p class="suave chico">Este producto no tiene opciones.</p>'}
         <form class="fila nuevo-grupo" data-form="nuevoGrupo">
           <input name="nombre" placeholder="Nuevo grupo, ej: Proteína" class="crece">
@@ -1898,7 +1947,7 @@ function modalProducto(p, categoriaId) {
       switch (f.dataset.form) {
         case 'datos': {
           const [impuesto_tipo, impuesto_tasa] = v('impuesto').split('|');
-          const body = { nombre: v('nombre'), categoria_id: Number(v('categoria_id')), precio: v('precio'),
+          const body = { nombre: v('nombre'), categoria_id: Number(v('categoria_id')), precio: v('precio'), codigo_barras: v('codigo_barras'),
                          orden: v('orden'), descripcion: v('descripcion'), impuesto_tipo, impuesto_tasa: Number(impuesto_tasa) };
           if (prod) {
             body.activo = f.elements.activo.checked;
@@ -2110,6 +2159,15 @@ async function vistaAjustes(el) {
     </div>
 
     <div class="tarjeta">
+      <h3>Tipo de negocio</h3>
+      <p class="chico suave">En <b>Tienda</b> no hay mesas ni cocina: se cobra directo desde el mostrador y los productos pueden tener código de barras.</p>
+      <form data-submit="tipoNegocio" class="fila">
+        <select name="tipo_negocio" style="max-width:420px">${Object.entries(TIPO_NEGOCIO).map(([k, v]) =>
+          `<option value="${k}" ${(aj.tipo_negocio || 'restaurante') === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+        <button class="primario">Guardar</button>
+      </form>
+    </div>
+    <div class="tarjeta" ${modoTienda() ? 'style="display:none"' : ''}>
       <h3>Mesas</h3>
       <div class="fila">${mesas.map((m) => `<span class="chip abierto" style="font-size:.85rem">${esc(m.nombre)}
         <button class="peq icono" style="min-height:0;padding:0 .2rem;border:0;background:none" data-acc="quitarMesa" data-id="${m.id}" aria-label="Quitar">✕</button></span>`).join('')}</div>
@@ -2117,7 +2175,7 @@ async function vistaAjustes(el) {
     </div>
     <div class="tarjeta">
       <h3>Apariencia</h3>
-      <p class="chico suave">Colores e ícono de este restaurante. Se ven en todos sus equipos.</p>
+      <p class="chico suave">Colores e ícono de este ${T('restaurante', 'negocio')}. Se ven en todos sus equipos.</p>
       <div class="temas">${Object.entries(TEMAS).map(([k, t]) => `
         <button type="button" class="tema-opcion" data-acc="elegirTema" data-tema="${k}" title="${t.nombre}">
           <span class="tema-muestra ${t.estilo ? `muestra-${t.estilo}` : ''}" style="background:linear-gradient(135deg, ${t.barra} 0 50%, ${t.primario} 50% 75%, ${t.acento} 75%)"></span>
@@ -2239,6 +2297,13 @@ async function vistaAjustes(el) {
     },
     mesa: async (f) => { await api('/mesas', { method: 'POST', body: { nombre: f.nombre.value } }); vistaAjustes(el); },
     quitarMesa: async (b) => { await api(`/mesas/${b.dataset.id}`, { method: 'DELETE' }); vistaAjustes(el); },
+    tipoNegocio: async (f) => {
+      await api('/ajustes', { method: 'PUT', body: { tipo_negocio: f.tipo_negocio.value } });
+      S.ajustes = await api('/ajustes');
+      pintarNav();
+      toast(`Listo: el sistema funciona como ${f.tipo_negocio.value === 'tienda' ? 'tienda' : 'restaurante'}`, 'ok');
+      vistaAjustes(el);
+    },
     elegirTema: (b) => {
       const t = TEMAS[b.dataset.tema];
       const f = $('#form-tema');

@@ -293,49 +293,82 @@ async function validarFiado(c, clienteId, valor) {
 // Cobrar: { pagos: [{medio, valor}], por_liquidar: bool, fiado_cliente_id }
 // por_liquidar = el domiciliario recibe el efectivo y lo entrega después en caja
 // FIADO = el valor queda como deuda del cliente fiado_cliente_id (cuentas por cobrar)
+// En una tienda no hay cocina: lo vendido se da por entregado al cobrar
+// (pendiente → en_cocina descuenta el inventario; luego listo → entregado).
+async function entregarTodo(c, pedidoId) {
+  await enviarPendientes(c, pedidoId);
+  await c.query(`UPDATE pedido_item SET estado = 'listo' WHERE pedido_id = $1 AND estado IN ('en_cocina', 'preparando')`, [pedidoId]);
+  await c.query(`UPDATE pedido_item SET estado = 'entregado' WHERE pedido_id = $1 AND estado = 'listo'`, [pedidoId]);
+}
+
+// Registra los pagos y cierra el pedido. Devuelve el aviso de facturación (si falló).
+// { pagos, por_liquidar, factura, fiado_cliente_id }; entregar: dar por entregados los ítems antes de cobrar
+async function cobrarPedido(c, id, body, usuario, { entregar = false } = {}) {
+  const { pagos = [], por_liquidar = false, factura = null, fiado_cliente_id = null } = body;
+  const { rows: [p] } = await c.query(`SELECT * FROM pedido WHERE id = $1 FOR UPDATE`, [id]);
+  if (!p) throw new ErrorApp('Pedido no encontrado', 404);
+  const { rows: [turno] } = await c.query(`SELECT id FROM turno_caja WHERE estado = 'abierto'`);
+  const cfg = await leerConfig(c);
+  if (entregar || cfg.tipo_negocio === 'tienda') await entregarTodo(c, id);
+
+  if (por_liquidar) {
+    if (p.tipo !== 'DOMICILIO' || !p.domiciliario_id) throw new ErrorApp('Asigne primero el domiciliario');
+    const { rows: [{ total }] } = await c.query(`SELECT total_pedido($1) AS total`, [id]);
+    await c.query(
+      `INSERT INTO pago (pedido_id, medio, valor, turno_id, domiciliario_id, registrado_por)
+       VALUES ($1, 'EFECTIVO', $2, NULL, $3, $4)`, [id, total, p.domiciliario_id, usuario.id]);
+  } else {
+    if (!turno) throw new ErrorApp('No hay caja abierta. Abra el turno de caja para cobrar.');
+    if (!pagos.length) throw new ErrorApp('Registre al menos un pago');
+    const fiado = pagos.filter((pg) => pg.medio === 'FIADO').reduce((s, pg) => s + Math.round(Number(pg.valor) || 0), 0);
+    const clienteFiado = fiado ? await validarFiado(c, fiado_cliente_id, fiado) : null;
+    for (const pg of pagos) {
+      if (!MEDIOS.includes(pg.medio) || !(Number(pg.valor) > 0)) throw new ErrorApp('Pago inválido');
+      await c.query(
+        `INSERT INTO pago (pedido_id, medio, valor, turno_id, registrado_por, cliente_id) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [id, pg.medio, Math.round(Number(pg.valor)), turno.id, usuario.id, pg.medio === 'FIADO' ? clienteFiado : null]);
+    }
+  }
+  await c.query(`UPDATE pedido SET estado = 'pagado' WHERE id = $1`, [id]);
+
+  // Facturación electrónica: factura si el cliente la pidió; si no, POS electrónico.
+  // Un problema con la factura (p. ej. rango agotado) no impide cobrar: se avisa al cajero.
+  if (cfg.fe_activa === 'true' && (factura?.cliente_fiscal_id || cfg.fe_auto_pos !== 'false')) {
+    try {
+      await tx((c2) => crearDocumento(c2, {
+        pedidoId: id, tipo: factura?.cliente_fiscal_id ? 'FACTURA' : 'POS',
+        clienteFiscalId: factura?.cliente_fiscal_id || null, usuarioId: usuario.id }));
+    } catch (e) {
+      return `El pedido se cobró, pero no se generó el documento electrónico: ${e.message}`;
+    }
+  }
+  return null;
+}
+
 r.post('/pedidos/:id/cobrar', permite('cajero'), ah(async (req, res) => {
   const id = Number(req.params.id);
-  const { pagos = [], por_liquidar = false, factura = null, fiado_cliente_id = null } = req.body;
   let avisoFe = null;
-  await tx(async (c) => {
-    const { rows: [p] } = await c.query(`SELECT * FROM pedido WHERE id = $1 FOR UPDATE`, [id]);
-    if (!p) throw new ErrorApp('Pedido no encontrado', 404);
-    const { rows: [turno] } = await c.query(`SELECT id FROM turno_caja WHERE estado = 'abierto'`);
+  await tx(async (c) => { avisoFe = await cobrarPedido(c, id, req.body, req.usuario); });
+  avisar('pedidos', { id });
+  res.json({ ...(await obtenerPedido(pool, id)), aviso_fe: avisoFe });
+}));
 
-    if (por_liquidar) {
-      if (p.tipo !== 'DOMICILIO' || !p.domiciliario_id) throw new ErrorApp('Asigne primero el domiciliario');
-      const { rows: [{ total }] } = await c.query(`SELECT total_pedido($1) AS total`, [id]);
-      await c.query(
-        `INSERT INTO pago (pedido_id, medio, valor, turno_id, domiciliario_id, registrado_por)
-         VALUES ($1, 'EFECTIVO', $2, NULL, $3, $4)`, [id, total, p.domiciliario_id, req.usuario.id]);
-    } else {
-      if (!turno) throw new ErrorApp('No hay caja abierta. Abra el turno de caja para cobrar.');
-      if (!pagos.length) throw new ErrorApp('Registre al menos un pago');
-      const fiado = pagos.filter((pg) => pg.medio === 'FIADO').reduce((s, pg) => s + Math.round(Number(pg.valor) || 0), 0);
-      const clienteFiado = fiado ? await validarFiado(c, fiado_cliente_id, fiado) : null;
-      for (const pg of pagos) {
-        if (!MEDIOS.includes(pg.medio) || !(Number(pg.valor) > 0)) throw new ErrorApp('Pago inválido');
-        await c.query(
-          `INSERT INTO pago (pedido_id, medio, valor, turno_id, registrado_por, cliente_id) VALUES ($1, $2, $3, $4, $5, $6)`,
-          [id, pg.medio, Math.round(Number(pg.valor)), turno.id, req.usuario.id, pg.medio === 'FIADO' ? clienteFiado : null]);
-      }
-    }
-    await c.query(`UPDATE pedido SET estado = 'pagado' WHERE id = $1`, [id]);
-
-    // Facturación electrónica: factura si el cliente la pidió; si no, POS electrónico.
-    // Un problema con la factura (p. ej. rango agotado) no impide cobrar: se avisa al cajero.
-    const cfg = await leerConfig(c);
-    if (cfg.fe_activa === 'true' && (factura?.cliente_fiscal_id || cfg.fe_auto_pos !== 'false')) {
-      try {
-        await tx((c2) => crearDocumento(c2, {
-          pedidoId: id, tipo: factura?.cliente_fiscal_id ? 'FACTURA' : 'POS',
-          clienteFiscalId: factura?.cliente_fiscal_id || null, usuarioId: req.usuario.id }));
-      } catch (e) {
-        avisoFe = `El pedido se cobró, pero no se generó el documento electrónico: ${e.message}`;
-      }
-    }
+// Venta directa de mostrador: se crea, se entrega y se cobra en un solo paso (tiendas, comidas rápidas).
+// { nombre_cliente, nota, items, pagos, fiado_cliente_id, factura }
+r.post('/pedidos/venta', permite('cajero'), ah(async (req, res) => {
+  const b = req.body;
+  if (!b.items?.length) throw new ErrorApp('Agregue al menos un producto');
+  let avisoFe = null;
+  const id = await tx(async (c) => {
+    const { rows: [p] } = await c.query(
+      `INSERT INTO pedido (tipo, nombre_cliente, nota, mesero_id) VALUES ('LLEVAR', $1, $2, $3) RETURNING id`,
+      [b.nombre_cliente?.trim() || null, b.nota?.trim() || null, req.usuario.id]);
+    await agregarItems(c, p.id, b.items);
+    avisoFe = await cobrarPedido(c, p.id, b, req.usuario, { entregar: true });
+    return p.id;
   });
   avisar('pedidos', { id });
+  avisar('caja');
   res.json({ ...(await obtenerPedido(pool, id)), aviso_fe: avisoFe });
 }));
 
