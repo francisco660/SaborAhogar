@@ -461,13 +461,21 @@ const puedeVer = (roles) => (roles === 'superadmin' ? !!S.usuario?.superadmin : 
 const PERMISO_VISTA = { pedido: ['cajero', 'mesero'] };
 // En una tienda no hay cocina y los nombres del menú cambian
 const NAV_TIENDA = { pedidos: 'Ventas', menu: 'Productos' };
+// Nombres propios que cada negocio le da al menú (ajuste nombres_menu, JSON { vista: nombre })
+function nombresPropios() {
+  try { return JSON.parse(S.ajustes?.nombres_menu || '{}') || {}; } catch { return {}; }
+}
+const nombreBase = (v) => (modoTienda() && NAV_TIENDA[v]) || NAV.find(([x]) => x === v)?.[1] || v;
+const nombreVista = (v) => nombresPropios()[v] || nombreBase(v);
+// Título de una pantalla: el nombre propio si lo hay; si no, el título habitual
+const tituloVista = (v, porDefecto) => esc(nombresPropios()[v] || porDefecto);
 const ESTADO_ITEM_TIENDA = { pendiente: 'Sin cobrar', en_cocina: 'Registrado', preparando: 'Registrado', listo: 'Listo', entregado: 'Entregado' };
 const ESTADO_ITEM_RESTAURANTE = { ...ESTADO_ITEM };
 function pintarNav() {
   Object.assign(ESTADO_ITEM, modoTienda() ? ESTADO_ITEM_TIENDA : ESTADO_ITEM_RESTAURANTE);
   $('#nav').innerHTML = NAV.filter(([v, , r]) => puedeVer(r) && !(modoTienda() && v === 'cocina'))
-    .map(([v, t]) => {
-      const titulo = modoTienda() ? NAV_TIENDA[v] || t : t;
+    .map(([v]) => {
+      const titulo = esc(nombreVista(v));
       return `<a href="#${v}" data-v="${v}" title="${titulo}"><span class="ico">${ICONO_NAV[v] || '•'}</span><span class="txt">${titulo}</span></a>`;
     }).join('');
   $$('#nav a').forEach((a) => a.classList.toggle('activo', a.dataset.v === (S.vista?.nombre === 'pedido' ? 'pedidos' : S.vista?.nombre)));
@@ -697,7 +705,7 @@ async function vistaPedidos(el) {
   };
   el.innerHTML = `
     <div class="titulo-vista">
-      <h2>${T('Pedidos', 'Ventas')}</h2>
+      <h2>${tituloVista('pedidos', T('Pedidos', 'Ventas'))}</h2>
       <div class="fila">
         ${modoTienda()
           ? '<a class="btn primario" href="#pedido/nuevo/LLEVAR">+ Nueva venta</a><a class="btn" href="#pedido/nuevo/DOMICILIO">+ Domicilio</a>'
@@ -1257,7 +1265,7 @@ async function vistaCocina(el) {
   if (!S.cocinaVistos.size) S.cocinaVistos.add(0);
 
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Cocina</h2><span class="suave">${comandas.length} pedido(s) en cocina</span></div>
+    <div class="titulo-vista"><h2>${tituloVista('cocina', 'Cocina')}</h2><span class="suave">${comandas.length} pedido(s) en cocina</span></div>
     ${comandas.length ? `<div class="cocina">${comandas.map((c) => {
       const min = minutos(c.desde);
       const destino = c.tipo === 'MESA' ? esc(c.mesa) : c.tipo === 'DOMICILIO' ? '🛵 Domicilio' : '🥡 Para llevar';
@@ -1325,7 +1333,7 @@ async function vistaDomicilios(el) {
       </div>
     </div>`;
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Domicilios de hoy</h2>
+    <div class="titulo-vista"><h2>${tituloVista('domicilios', 'Domicilios de hoy')}</h2>
       ${!esDomi ? '<a class="btn primario" href="#pedido/nuevo/DOMICILIO">+ Domicilio</a>' : ''}</div>
     ${pend.length ? `<div class="lista-pedidos">${pend.map(tarjeta).join('')}</div>` : '<p class="vacio">No hay domicilios pendientes.</p>'}
     ${entregados.length ? `<div class="seccion"><h3>Entregados (${entregados.length})</h3><div class="tarjeta tabla-cont"><table>
@@ -1360,7 +1368,7 @@ async function vistaCaja(el) {
   const filaCuadre = (lbl, v, signo = '') => `<tr><td>${signo} ${lbl}</td><td class="num">${pesos(v)}</td></tr>`;
 
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Caja</h2>
+    <div class="titulo-vista"><h2>${tituloVista('caja', 'Caja')}</h2>
       ${t ? `<span class="chip abierto">Turno #${t.id} abierto por ${esc(t.cajero)} · ${fechaHora(t.abierto_en)}</span>` : ''}</div>
     ${!t ? `
       <form class="tarjeta" data-submit="abrir" style="max-width:420px">
@@ -1508,7 +1516,7 @@ async function vistaInventario(el) {
         <td class="chico suave">${m.pedido_id ? `Pedido #${m.pedido_numero}` : ''} ${esc(m.nota || '')} ${esc(m.usuario || '')}</td></tr>`).join('')}</tbody></table></div>`;
   }
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Inventario</h2>
+    <div class="titulo-vista"><h2>${tituloVista('inventario', 'Inventario')}</h2>
       <div class="fila">${tiene() ? '<button data-acc="nuevo">+ Insumo</button>' : ''}<a class="btn" href="#gastos">+ Registrar compra</a></div></div>
     ${alertas.length ? `<div class="tarjeta" style="border-color:var(--rojo);margin-bottom:1rem"><b class="negativo">⚠ ${alertas.length} insumo(s) bajo el mínimo:</b>
       ${alertas.map((a) => esc(a.nombre)).join(', ')}</div>` : ''}
@@ -1575,7 +1583,7 @@ async function vistaGastos(el) {
   const hoy = hoyISO();
   const inicioMes = hoy.slice(0, 8) + '01';
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Gastos e insumos</h2>
+    <div class="titulo-vista"><h2>${tituloVista('gastos', 'Gastos e insumos')}</h2>
       <div class="fila"><button data-acc="proveedor">+ Proveedor</button><button class="primario" data-acc="nuevo">+ Registrar gasto</button></div></div>
     <form class="fila tarjeta" data-submit="filtrar" style="margin-bottom:1rem">
       <div><label>Desde</label><input type="date" name="desde" value="${desde}"></div>
@@ -1747,7 +1755,7 @@ async function vistaMenu(el) {
   };
 
   el.innerHTML = `
-    <div class="titulo-vista"><h2>${T('Menú', 'Productos')}</h2>
+    <div class="titulo-vista"><h2>${tituloVista('menu', T('Menú', 'Productos'))}</h2>
       <div class="fila">
         <button data-acc="nuevaCategoria">+ Categoría</button>
         <button class="primario" data-acc="nuevoProducto" ${menu.length ? '' : 'disabled title="Cree primero una categoría"'}>+ Producto</button>
@@ -2049,7 +2057,7 @@ async function vistaReportes(el) {
   const hoy = hoyISO();
   const inicioMes = hoy.slice(0, 8) + '01';
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Reportes y utilidades</h2></div>
+    <div class="titulo-vista"><h2>${tituloVista('reportes', 'Reportes y utilidades')}</h2></div>
     <form class="tarjeta fila" data-submit="filtrar" style="margin-bottom:1rem">
       <div><label>Desde</label><input type="date" name="desde" value="${r.desde}"></div>
       <div><label>Hasta</label><input type="date" name="hasta" value="${r.hasta}"></div>
@@ -2091,9 +2099,15 @@ async function vistaReportes(el) {
 
 // ═══ VISTA: Ajustes (usuarios, empleados, mesas, negocio) ───────────────
 async function vistaAjustes(el) {
+  const guardarNombres = async (nombres) => {
+    await api('/ajustes', { method: 'PUT', body: { nombres_menu: JSON.stringify(nombres) } });
+    S.ajustes = await api('/ajustes');
+    pintarNav();
+    vistaAjustes(el);
+  };
   const [usuarios, empleados, mesas, aj] = await Promise.all([api('/usuarios'), api('/empleados'), api('/mesas'), api('/ajustes')]);
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Ajustes</h2></div>
+    <div class="titulo-vista"><h2>${tituloVista('ajustes', 'Ajustes')}</h2></div>
     <div class="admin-grid">
       <div class="tarjeta panel-admin">
         <div class="panel-head">
@@ -2165,6 +2179,17 @@ async function vistaAjustes(el) {
         <select name="tipo_negocio" style="max-width:420px">${Object.entries(TIPO_NEGOCIO).map(([k, v]) =>
           `<option value="${k}" ${(aj.tipo_negocio || 'restaurante') === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
         <button class="primario">Guardar</button>
+      </form>
+    </div>
+    <div class="tarjeta">
+      <h3>Nombres del menú</h3>
+      <p class="chico suave">Llame cada opción como se dice en su negocio. Se ve en el menú y en el título de cada pantalla. Vacío = nombre normal.</p>
+      <form data-submit="nombresMenu">
+        <div class="campos">${NAV.filter(([v]) => v !== 'restaurantes' && !(modoTienda() && v === 'cocina')).map(([v]) => `
+          <div><label>${ICONO_NAV[v] || ''} ${esc(nombreBase(v))}</label>
+            <input name="${v}" maxlength="30" placeholder="${esc(nombreBase(v))}" value="${esc(nombresPropios()[v] || '')}"></div>`).join('')}</div>
+        <div class="fila" style="margin-top:.6rem"><button class="primario">Guardar nombres</button>
+          <button type="button" data-acc="nombresOriginales">Volver a los originales</button></div>
       </form>
     </div>
     <div class="tarjeta" ${modoTienda() ? 'style="display:none"' : ''}>
@@ -2297,6 +2322,17 @@ async function vistaAjustes(el) {
     },
     mesa: async (f) => { await api('/mesas', { method: 'POST', body: { nombre: f.nombre.value } }); vistaAjustes(el); },
     quitarMesa: async (b) => { await api(`/mesas/${b.dataset.id}`, { method: 'DELETE' }); vistaAjustes(el); },
+    nombresMenu: async (f) => {
+      const nombres = {};
+      for (const i of f.querySelectorAll('input')) if (i.value.trim()) nombres[i.name] = i.value.trim();
+      await guardarNombres(nombres);
+      toast('Nombres guardados', 'ok');
+    },
+    nombresOriginales: async () => {
+      if (!(await confirmar('¿Volver a los nombres originales del menú?'))) return;
+      await guardarNombres({});
+      toast('Se restauraron los nombres originales', 'ok');
+    },
     tipoNegocio: async (f) => {
       await api('/ajustes', { method: 'PUT', body: { tipo_negocio: f.tipo_negocio.value } });
       S.ajustes = await api('/ajustes');
@@ -2342,7 +2378,7 @@ async function vistaAjustes(el) {
 async function vistaRestaurantes(el) {
   const lista = await api('/superadmin/restaurantes');
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Restaurantes</h2>
+    <div class="titulo-vista"><h2>${tituloVista('restaurantes', 'Restaurantes')}</h2>
       <span class="suave">Ahora estás en: <b>${esc(S.usuario.restaurante || '')}</b></span></div>
     <div class="tarjeta tabla-cont"><table>
       <thead><tr><th>#</th><th>Restaurante</th><th>Ciudad</th><th class="num">Usuarios</th><th class="num">Pedidos</th><th>Último pedido</th><th>Estado</th><th></th></tr></thead>
@@ -2636,7 +2672,7 @@ async function vistaPersonal(el) {
     const lista = personas.map((p) => ({ ...p, e: estado(p) })).sort((a, b) => a.e.orden - b.e.orden || a.nombre.localeCompare(b.nombre));
     const n = (c) => lista.filter((p) => p.e.clase === c).length;
     el.innerHTML = `
-      <div class="titulo-vista"><h2>Personal</h2><div class="fila">${botonUbic}<button data-acc="manual">+ Registro manual</button></div></div>
+      <div class="titulo-vista"><h2>${tituloVista('personal', 'Personal')}</h2><div class="fila">${botonUbic}<button data-acc="manual">+ Registro manual</button></div></div>
       ${S.ajustes?.ubicacion_lat ? '' : '<div class="tarjeta aviso-ubic">📍 Configure la <b>ubicación del restaurante</b> para saber si el personal marca desde el lugar de trabajo. <button class="peq primario" data-acc="ubicacionLocal">Configurar ahora</button></div>'}
       ${pestañas}
       <div class="kpis">
@@ -2678,7 +2714,7 @@ async function vistaPersonal(el) {
     const hoy = hoyISO();
     const atajo = (lbl, d, h) => `<button type="button" class="peq" data-acc="rango" data-d="${d}" data-h="${h}">${lbl}</button>`;
     el.innerHTML = `
-      <div class="titulo-vista"><h2>Personal</h2>
+      <div class="titulo-vista"><h2>${tituloVista('personal', 'Personal')}</h2>
         <div class="fila">${botonUbic}<button data-acc="exportar" ${registros.length ? '' : 'disabled'}>⬇ Exportar CSV</button><button data-acc="manual">+ Registro manual</button></div></div>
       ${pestañas}
       <form class="tarjeta fila" data-submit="filtrar" style="margin-bottom:1rem">
@@ -2745,7 +2781,7 @@ async function vistaPersonal(el) {
     .map((t) => `<button type="button" class="turno-chip" data-acc="editarTurno" data-id="${t.id}" title="${esc(t.nota || 'Editar turno')}">${t.hora_inicio}–${t.hora_fin}</button>`).join('')
     + `<button type="button" class="turno-mas" data-acc="nuevoTurno" data-u="${p.id}" data-f="${d}" aria-label="Agregar turno">+</button>`;
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Personal</h2>
+    <div class="titulo-vista"><h2>${tituloVista('personal', 'Personal')}</h2>
       <div class="fila"><button data-acc="copiar">⧉ Copiar semana anterior</button><button class="primario" data-acc="nuevoTurno">+ Programar turno</button></div></div>
     ${pestañas}
     <div class="tarjeta">
@@ -2949,7 +2985,7 @@ async function vistaFacturas(el) {
     const hoy = hoyISO();
     const problemas = docs.filter((d) => ['error', 'rechazado'].includes(d.estado)).length;
     el.innerHTML = `
-      <div class="titulo-vista"><h2>Facturación electrónica</h2></div>
+      <div class="titulo-vista"><h2>${tituloVista('facturas', 'Facturación electrónica')}</h2></div>
       ${pestañas}
       ${feActiva() ? '' : `<div class="tarjeta aviso-ubic">⚠️ La facturación electrónica está <b>desactivada</b> para este restaurante.
         ${tiene() ? '<button class="peq primario" data-acc="tab" data-tab="config">Configurar</button>' : 'Pida al administrador que la configure.'}</div>`}
@@ -3028,7 +3064,7 @@ async function vistaFacturas(el) {
     </fieldset>`;
   };
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Facturación electrónica</h2></div>
+    <div class="titulo-vista"><h2>${tituloVista('facturas', 'Facturación electrónica')}</h2></div>
     ${pestañas}
     <form class="tarjeta" data-submit="guardar" id="form-fe">
       <fieldset class="grupo-op"><legend>Proveedor tecnológico</legend>
@@ -3138,7 +3174,7 @@ async function vistaContabilidad(el) {
   ];
 
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Contabilidad</h2>
+    <div class="titulo-vista"><h2>${tituloVista('contabilidad', 'Contabilidad')}</h2>
       <div class="fila">
         <button data-acc="excel" class="primario">⬇ Excel para el contador</button>
         <button data-acc="pdf">🖨️ Informe PDF</button>
@@ -3320,7 +3356,7 @@ async function vistaFiados(el, id) {
       || `<tr><td colspan="6" class="vacio">${lista.length ? 'Sin resultados.' : 'Nadie debe nada. Para fiar, elija "Fiado" al cobrar un pedido.'}</td></tr>`;
   };
   el.innerHTML = `
-    <div class="titulo-vista"><h2>Fiados · cuentas por cobrar</h2></div>
+    <div class="titulo-vista"><h2>${tituloVista('fiados', 'Fiados · cuentas por cobrar')}</h2></div>
     <div class="kpis">
       <div class="kpi destacado"><div class="t">Total por cobrar</div><div class="v">${pesos(total)}</div></div>
       <div class="kpi"><div class="t">Clientes que deben</div><div class="v">${deben.length}</div></div>
@@ -3349,7 +3385,7 @@ async function vistaFiadoCliente(el, id) {
   const { cliente: c, movimientos } = await api(`/cartera/${id}`);
   const wa = Number(c.saldo) > 0 ? enlaceWhatsapp(c.telefono, textoRecordatorio(c)) : '';
   el.innerHTML = `
-    <div class="titulo-vista"><h2><a href="#fiados" class="suave">Fiados</a> › ${esc(c.nombre || 'Sin nombre')}</h2>
+    <div class="titulo-vista"><h2><a href="#fiados" class="suave">${esc(nombreVista('fiados'))}</a> › ${esc(c.nombre || 'Sin nombre')}</h2>
       <div class="fila">
         ${wa ? `<a class="btn" href="${wa}" target="_blank" rel="noopener">💬 Recordar por WhatsApp</a>` : ''}
         <button data-acc="imprimir">🖨️ Estado de cuenta</button>
